@@ -44,11 +44,17 @@ cabal-version:       >=1.8
 
 executable ice
   -- .hs or .lhs file containing the Main module.
-  -- main-is:             
+  main-is:             ice.hs
+  -- ghc-options: -prof -auto-all -caf-all
   
   -- Modules included in this executable, other than Main.
   -- other-modules:       
   
   -- Other library packages from which modules are imported.
   build-depends:       base ==4.6.*
-  
+                     , attoparsec
+                     , primefield
+                     , vector
+                     , bytestring
+                     , ghc-heap-view
+                     , deepseq
