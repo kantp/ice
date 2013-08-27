@@ -2,7 +2,7 @@
 {-# LANGUAGE BangPatterns #-}
 
 module Ice.ParseIbp
-       (ibp)
+       (ibp, assertNFNamed)
        where
 
 import           Control.Applicative
@@ -13,8 +13,12 @@ import qualified Data.ByteString as B
 import           Data.Maybe
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
-import           GHC.AssertNF
+import           Debug.Trace
+-- import           GHC.AssertNF
 import           System.IO.Unsafe (unsafePerformIO)
+
+assertNFNamed :: String -> a -> IO ()
+assertNFNamed _ _ = return ()
 
 data Term = Term !Int !(V.Vector Int) deriving Show
 data Line = Line !(V.Vector Int) !(BV.Vector Term) deriving Show
@@ -27,10 +31,15 @@ instance NFData Line where
 
 power :: [(Int, B.ByteString)] -> Parser (Int, Int)
 power xs = {-# SCC "power" #-} do
-  coeff <- msum (map stringInd xs)
+  !coeff <- foldr (<|>) empty (map stringInd xs)
   expo <- option 1 $ char '^' *> decimal
   option undefined (char '*')
-  return $! (coeff, expo)
+  return $!
+    (unsafePerformIO $ assertNFNamed "coeff" coeff)
+    `seq`
+    (unsafePerformIO $ assertNFNamed "expo" expo)
+    `seq`
+    (coeff, expo)
     where
       stringInd (i,s) = string s *> return i
 
@@ -84,7 +93,8 @@ ibp xs = do
   skipSpace
   lines <- manyTill' (ibpLine xs) (char ';')
   endOfLine
-  lines `deepseq` return $!
+  {- trace (show lines) $ -}
+  return $!
     (unsafePerformIO $ assertNFNamed "lines" lines)
     `seq`
     Ibp (BV.fromList lines)

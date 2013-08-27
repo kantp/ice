@@ -4,7 +4,8 @@ module Main where
 import           Control.Exception (bracket)
 import           Data.Attoparsec
 import qualified Data.ByteString.Char8 as B
-import           GHC.AssertNF
+import Debug.Trace
+-- import           GHC.AssertNF
 import           Ice.ParseIbp
 import           System.Environment
 import           System.IO
@@ -13,6 +14,7 @@ refill h = B.hGet h (4*1024)
 incrementy xs file h = go [] =<< refill h
  where
    go !acc is = do
+     -- print (length acc)
      r <- parseWith (refill h) (ibp xs) is
      case r of
        Fail _ _ msg -> error msg
