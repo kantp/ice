@@ -2,12 +2,13 @@ module Ice.Types
 
 where
 
+import           Control.DeepSeq
+import qualified Data.Array.Repa as R
+import           Data.List (intercalate)
 import           Data.Monoid
 import           Data.Ord
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
-import           Control.DeepSeq
-import Data.List (intercalate)
 
 -- | A scalar integral is represented by its indices.
 newtype SInt = SInt (V.Vector Int) deriving Eq
@@ -36,7 +37,8 @@ instance Ord SInt where
 data Term = Term !Int !(V.Vector Int) deriving Show
 -- | One term in an IBP equation.
 data IbpLine = IbpLine { ibpIntegral :: !SInt
-                       , ibpCoefficient :: !(BV.Vector Term) } deriving Show
+                       , ibpCfs :: !(R.Array R.U R.DIM1 Int)
+                       , ibpExps :: !(R.Array R.U R.DIM2 Int) } deriving Show
 -- | An IBP equation.
 data Ibp = Ibp !(BV.Vector IbpLine) deriving Show
 
@@ -45,7 +47,11 @@ instance NFData SInt where
 instance NFData Term where
   rnf (Term x y) = rnf x `seq` V.map rnf y `seq` ()
 instance NFData IbpLine where
-  rnf (IbpLine x y) = rnf x `seq` BV.map rnf y `seq` ()
+  rnf (IbpLine x y z) =
+    rnf x
+    `seq` (R.computeS (R.map rnf y) :: R.Array R.U R.DIM1 ())
+    `seq` (R.computeS (R.map rnf z) :: R.Array R.U R.DIM2 ())
+    `seq` ()
 instance NFData Ibp where
   rnf (Ibp x) = rnf x 
 
