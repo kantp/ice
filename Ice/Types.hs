@@ -7,13 +7,16 @@ import           Data.Ord
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Control.DeepSeq
+import Data.List (intercalate)
 
 -- | A scalar integral is represented by its indices.
-newtype SInt = SInt (V.Vector Int) deriving (Show, Eq)
+newtype SInt = SInt (V.Vector Int) deriving Eq
+instance Show SInt where
+  show (SInt xs) = "I(" ++ intercalate "," (map show $ V.toList xs) ++ ")"
 
--- | Scalar integrals are ordered as in Laporta's paper.
+-- | Scalar integrals are ordered as in Laporta's paper, in decreasing order.
 instance Ord SInt where
-  compare (SInt x) (SInt y) = laportaOrdering x y where
+  compare (SInt x) (SInt y) = laportaOrdering y x where
     laportaOrdering =
       comparing (V.length . V.filter (/=0))
       `mappend` comparing md

@@ -39,7 +39,7 @@ getIntegrals (Ibp ibp) = BV.map ibpIntegral ibp
 
 main :: IO ()
 main = do
-  putStrLn "ice"
+  putStrLn "ice -- the Ibp ChoosEr"
   (eqFile:invariants) <- getArgs
   let invariants' = zip [0..] (map B.pack invariants)
   equations <- withFile eqFile ReadMode $
@@ -51,3 +51,5 @@ main = do
   print (length equations)
   putStr "Number of integrals: "
   print (length integrals)
+  putStrLn "Integrals: "
+  mapM_ print integrals
