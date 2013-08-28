@@ -14,20 +14,12 @@ import           Data.Maybe
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Debug.Trace
+import           Ice.Types
 -- import           GHC.AssertNF
 import           System.IO.Unsafe (unsafePerformIO)
 
 assertNFNamed :: String -> a -> IO ()
 assertNFNamed _ _ = return ()
-
-data Term = Term !Int !(V.Vector Int) deriving Show
-data Line = Line !(V.Vector Int) !(BV.Vector Term) deriving Show
-data Ibp = Ibp !(BV.Vector Line) deriving Show
-
-instance NFData Term where
-  rnf (Term x y) = x `seq` y `deepseq` () --  V.force y `seq` ()
-instance NFData Line where
-  rnf (Line x y) = x `deepseq` y `deepseq` () --  BV.force (BV.map deepseq y) `seq` ()
 
 power :: [(Int, B.ByteString)] -> Parser (Int, Int)
 power xs = {-# SCC "power" #-} do
@@ -49,7 +41,7 @@ coefficient = {-# SCC "coefficient" #-} signed (option 1 decimal) <* option unde
 term :: [(Int, B.ByteString)] -> Parser Term
 term xs = {-# SCC "term" #-} do
   !cf <- coefficient
-  factors <- many (power xs)
+  factors <- many' (power xs)
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i {- (xs !! i) -} factors)
   return $!
       (unsafePerformIO $ assertNFNamed "cf" cf)
@@ -61,39 +53,33 @@ term xs = {-# SCC "term" #-} do
 indices :: Parser (V.Vector Int)
 indices = {-# SCC "indices" #-} do
   char '{'
-  skipSpace
+  char ' '
   !inds <- liftM V.fromList $ sepBy (signed decimal) (char ' ')
-  skipSpace
+  char ' '
   char '}'
   return $!
     (unsafePerformIO $ assertNFNamed "inds" inds)
     `seq`
     inds
 
--- ibpLine :: [(Int, B.ByteString)] -> Parser (V.Vector Int, [Term])
-ibpLine :: [(Int, B.ByteString)] -> Parser Line
+ibpLine :: [(Int, B.ByteString)] -> Parser IbpLine
 ibpLine xs = {-# SCC "ibpLine" #-} do
   inds <- indices
-  skipSpace
+  char ' '
   char '*'
-  skipSpace
-  poly <- manyTill' (term xs) (char '\n')
+  char ' '
+  poly <- manyTill' (term xs) endOfLine -- (char '\n')
   return $!
     (unsafePerformIO $ assertNFNamed "inds" inds)
     `seq`
     (unsafePerformIO $ assertNFNamed "poly" poly)
     `seq`
-    Line inds (BV.fromList poly)
+    IbpLine (SInt inds) (BV.fromList poly)
 
--- ibp :: [(Int, B.ByteString)] -> Parser [(V.Vector Int, [Term])]
 ibp :: [(Int, B.ByteString)] -> Parser Ibp
--- ibp xs = {-# SCC "ibp" #-} (liftM $ Ibp . BV.fromList) (skipSpace *> manyTill (ibpLine xs) (char ';') <* endOfLine)
-
 ibp xs = do
-  skipSpace
-  lines <- manyTill' (ibpLine xs) (char ';')
+  !lines <- manyTill' (ibpLine xs) (char ';')
   endOfLine
-  {- trace (show lines) $ -}
   return $!
     (unsafePerformIO $ assertNFNamed "lines" lines)
     `seq`

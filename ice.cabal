@@ -45,7 +45,8 @@ cabal-version:       >=1.8
 executable ice
   -- .hs or .lhs file containing the Main module.
   main-is:             ice.hs
-  ghc-options: -rtsopts
+  ghc-options: -rtsopts -fllvm
+  -- ghc-options: -Odph -rtsopts -fno-liberate-case -funfolding-use-threshold1000 -funfolding-keeness-factor1000 -fllvm -optlo-O3
   
   -- Modules included in this executable, other than Main.
   -- other-modules:       
@@ -58,3 +59,4 @@ executable ice
                      , bytestring
 --                     , ghc-heap-view
                      , deepseq
+                     , containers
