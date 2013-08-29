@@ -2,11 +2,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns #-}
-module Main where
+module Main
+       (main)
+       where
 
 import           Control.Arrow
 import           Control.DeepSeq
-import           Control.Exception (bracket)
 import           Control.Monad
 import           Control.Monad.Random
 import qualified Data.Array.Repa as R
@@ -16,6 +17,7 @@ import qualified Data.ByteString.Char8 as B
 import           Data.List
 import qualified Data.Map as Map
 import           Data.Maybe
+import           Data.Monoid
 import           Data.Numbers.Fp.Fp
 import           Data.Numbers.Fp.Matrix
 import           Data.Numbers.Fp.Polynomial.Multivariate
@@ -25,13 +27,13 @@ import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
-import           Debug.Trace
 import           Ice.ParseIbp -- (ibp)
 -- import           GHC.AssertNF
 import           Ice.Types
 import           System.Environment
 import           System.IO
 
+-- driver for the parser.
 refill :: Handle -> IO B.ByteString
 refill h = B.hGet h (4*1024)
 
@@ -64,6 +66,45 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
             ( fromMaybe (error "integral not found.") (Map.lookup (ibpIntegral line) table)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
+
+
+
+probeGauss :: forall s . Reifies s Int
+            => BV.Vector (Row s)
+            -> (Fp s Int, V.Vector Int, V.Vector Int)
+probeGauss !rs = probeStep (BV.indexed rs) 1 V.empty V.empty
+
+probeStep :: forall s . Reifies s Int
+             => BV.Vector (Int, Row s)
+             -> Fp s Int
+             -> V.Vector Int
+             -> V.Vector Int
+             -> (Fp s Int, V.Vector Int, V.Vector Int)
+probeStep !rs !d !j !i
+  | BV.null nonZeroRows = (d, j, i)
+  | otherwise = probeStep (BV.force rows') d' j' i'
+  where
+    nonZeroRows = BV.filter (not . V.null . snd) rs
+    pivotRowIndex = BV.minIndexBy
+                    (comparing (fst . V.head . snd)
+                     `mappend` comparing (V.length . snd))
+                    nonZeroRows
+    pivotRow = nonZeroRows BV.! pivotRowIndex
+    rowsToModify = BV.ifilter (\ n _ -> (n /= pivotRowIndex)) nonZeroRows
+    (pivotColumn, pivotElement) = (V.head . snd) pivotRow
+    invPivotElement = recip pivotElement
+    normalisedPivotRow = second (multRow invPivotElement) pivotRow
+    d' = d * pivotElement
+    j' = V.snoc j pivotColumn
+    pivotOperation (ind, row) =
+      let (n,x) = V.head row
+      in (if n == pivotColumn then (ind, addRows (multRow (-x) (snd normalisedPivotRow)) row) else (ind, row))
+    rows' = fmap pivotOperation rowsToModify
+    i' = V.snoc i (fst pivotRow)
+
+
+
+
 evalIbps :: forall s . Reifies s Int
             => Int
             -> Array U DIM1 (Fp s Int)
@@ -81,7 +122,7 @@ testMatrix :: forall s . Reifies s Int
               -> (Fp s Int, V.Vector Int, V.Vector Int)
               -- -> (V.Vector Int, V.Vector Int)
 testMatrix n xs rs = (d,j,i) where
-  (_, d, j, i) = gaussFwd (rows m)
+  (d, j, i) = probeGauss (rows m)
   m = evalIbps n xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
@@ -115,15 +156,18 @@ main = do
 
   let p = 15485867 :: Int -- primes !! 1000000 :: Int
   xs <- V.generateM (length invariants) (\_ -> getRandomR (1,p))
-  putStr "Probing for m = "
+  putStr "Probing for p = "
   print p
   putStr "Random points: "
-  print xs
+  print (V.toList xs)
   
   let (d,j,i) = withMod p (testMatrix (length integrals) xs ibpRows)
   putStr "d = "
   print d
-  putStr "j = "
-  print j
-  putStr "i = "
-  print i
+  putStr "length j = "
+  print (V.length j)
+  putStr "length i = "
+  print (V.length i)
+  putStrLn "Indices of linearly independent equations (starting at 0):"
+  V.mapM_ print i
+
