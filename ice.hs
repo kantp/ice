@@ -90,8 +90,9 @@ probeStep !rs !d !j !i
                     (comparing (fst . V.head . snd)
                      `mappend` comparing (V.length . snd))
                     nonZeroRows
-    pivotRow = nonZeroRows BV.! pivotRowIndex
-    rowsToModify = BV.ifilter (\ n _ -> (n /= pivotRowIndex)) nonZeroRows
+    (x,y) = BV.splitAt pivotRowIndex nonZeroRows
+    pivotRow = BV.head y
+    rowsToModify = x BV.++ BV.tail y
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
     normalisedPivotRow = second (multRow invPivotElement) pivotRow
