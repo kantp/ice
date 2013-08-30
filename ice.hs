@@ -172,11 +172,11 @@ main = do
   putStrLn "Indices of linearly independent equations (starting at 0):"
   V.mapM_ print i
 
-  -- let (reducibleIntegrals, irreducibleIntegrals) =
-  --       partition (\ i -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
-  --                        in V.elem n j) integrals
-  -- putStrLn "Integrals that can be reduced with these equations:"
-  -- mapM_ print reducibleIntegrals
-  -- putStrLn "Integrals that cannot be reduced with these equations:"
-  -- mapM_ print irreducibleIntegrals
+  let (reducibleIntegrals, irreducibleIntegrals) =
+        partition (\ i -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
+                         in V.elem n j) integrals
+  putStrLn "Integrals that can be reduced with these equations:"
+  mapM_ print reducibleIntegrals
+  putStrLn "Integrals that cannot be reduced with these equations:"
+  mapM_ print irreducibleIntegrals
   
