@@ -29,6 +29,7 @@ import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Ice.ParseIbp -- (ibp)
 -- import           GHC.AssertNF
+import           Data.Word (Word8)
 import           Ice.Types
 import           System.Environment
 import           System.IO
@@ -58,7 +59,7 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
-ibpToRow :: Map.Map SInt Int -> Ibp -> BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Int))
+ibpToRow :: Map.Map SInt Int -> Ibp -> BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))
 ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
   where
     row = map
@@ -108,7 +109,7 @@ probeStep !rs !d !j !i
 evalIbps :: forall s . Reifies s Int
             => Int
             -> Array U DIM1 (Fp s Int)
-            -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Int))]
+            -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
             -> Matrix s
 evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   rs' = BV.fromList (map treatRow rs)
@@ -118,7 +119,7 @@ evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
 testMatrix :: forall s . Reifies s Int
               => Int
               -> V.Vector Int
-              -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Int))]
+              -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
               -> (Fp s Int, V.Vector Int, V.Vector Int)
               -- -> (V.Vector Int, V.Vector Int)
 testMatrix n xs rs = (d,j,i) where
@@ -164,10 +165,18 @@ main = do
   let (d,j,i) = withMod p (testMatrix (length integrals) xs ibpRows)
   putStr "d = "
   print d
-  putStr "length j = "
-  print (V.length j)
-  putStr "length i = "
+  putStr "Number of linearly independent equations: "
   print (V.length i)
+  -- putStr "Number of equations that can be dropped : "
+  -- print (length equations - V.length i)
   putStrLn "Indices of linearly independent equations (starting at 0):"
   V.mapM_ print i
 
+  -- let (reducibleIntegrals, irreducibleIntegrals) =
+  --       partition (\ i -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
+  --                        in V.elem n j) integrals
+  -- putStrLn "Integrals that can be reduced with these equations:"
+  -- mapM_ print reducibleIntegrals
+  -- putStrLn "Integrals that cannot be reduced with these equations:"
+  -- mapM_ print irreducibleIntegrals
+  

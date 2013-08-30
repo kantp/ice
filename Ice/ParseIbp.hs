@@ -16,15 +16,17 @@ import qualified Data.Vector.Unboxed as V
 import           Debug.Trace
 import           Ice.Types
 -- import           GHC.AssertNF
-import           Data.Array.Repa hiding (map)
 import qualified Data.Array.Repa as R
+import           Data.Array.Repa hiding (map)
+import           Data.Int (Int8)
+import           Data.Word (Word8)
 import           System.IO.Unsafe (unsafePerformIO)
 
 assertNFNamed :: String -> a -> IO ()
 {-# INLINE assertNFNamed #-}
 assertNFNamed _ _ = return ()
 
-power :: [(Int, B.ByteString)] -> Parser (Int, Int)
+power :: [(Int, B.ByteString)] -> Parser (Int, Word8)
 {-# INLINE power #-}
 power xs = {-# SCC "power" #-} do
   !coeff <- foldr (<|>) empty (map stringInd xs)
@@ -55,7 +57,7 @@ term xs = {-# SCC "term" #-} do
       `seq`
       Term cf expos
 
-indices :: Parser (V.Vector Int)
+indices :: Parser (V.Vector Int8)
 {-# INLINE indices #-}
 indices = {-# SCC "indices" #-} do
   char '{'
@@ -68,7 +70,7 @@ indices = {-# SCC "indices" #-} do
     `seq`
     inds
 
-collectTerms :: Int -> [Term] -> (Array U DIM1 Int, Array U DIM2 Int)
+collectTerms :: Int -> [Term] -> (Array U DIM1 Int, Array U DIM2 Word8)
 {-# INLINE collectTerms #-}
 -- collectTerms [] = (fromUnboxed (Z :. 0) V.empty, fromUnboxed (Z :.0 :. 0) V.empty)
 collectTerms nVars !ts =
