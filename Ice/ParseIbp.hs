@@ -50,7 +50,7 @@ term xs = {-# SCC "term" #-} do
   !cf <- coefficient
   factors <- sepBy' (power xs) (char '*')
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i {- (xs !! i) -} factors)
-  expos `deepseq` return $!
+  return $!
       (unsafePerformIO $ assertNFNamed "cf" cf)
       `seq`
       (unsafePerformIO $ assertNFNamed "expos" expos)
@@ -73,11 +73,16 @@ indices = {-# SCC "indices" #-} do
 collectTerms :: Int -> [Term] -> (Array U DIM1 Int, Array U DIM2 Word8)
 {-# INLINE collectTerms #-}
 -- collectTerms [] = (fromUnboxed (Z :. 0) V.empty, fromUnboxed (Z :.0 :. 0) V.empty)
-collectTerms nVars !ts =
-  let nTerms = length ts
+collectTerms !nVars !ts =
+  let !nTerms = length ts
       !cfs = fromListUnboxed (Z :. nTerms) (map (\ (Term x _) -> x) ts)
       !exps = fromUnboxed (Z :. nTerms :. nVars) (V.concat (map (\ (Term _ x) -> x) ts))
-  in (cfs, exps)
+  in
+   (unsafePerformIO $ assertNFNamed "cfArray" cfs)
+   `seq`
+   (unsafePerformIO $ assertNFNamed "expArray" exps)
+   `seq`
+   (cfs, exps)
       
 
 ibpLine :: [(Int, B.ByteString)] -> Parser IbpLine
@@ -88,7 +93,7 @@ ibpLine xs = {-# SCC "ibpLine" #-} do
   char '*'
   char ' '
   poly <- manyTill' (term xs) endOfLine -- (char '\n')
-  let poly' = poly `deepseq` collectTerms (length xs) poly
+  let poly' = collectTerms (length xs) poly
   return $!
     (unsafePerformIO $ assertNFNamed "inds" inds)
     `seq`
@@ -103,7 +108,7 @@ ibp xs = do
   return $!
     (unsafePerformIO $ assertNFNamed "lines" lines)
     `seq`
-    Ibp (BV.fromList lines)
+    Ibp (BV.force $ BV.fromList lines)
 
 -- ibps xs = many' $ ibp xs
 -- ibps xs = manyTill' (ibp xs) atEnd
