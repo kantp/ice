@@ -43,7 +43,7 @@ data IbpLine = IbpLine { ibpIntegral :: !SInt
                        , ibpCfs :: !(R.Array R.U R.DIM1 Int)
                        , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
 -- | An IBP equation.
-data Ibp = Ibp !(BV.Vector IbpLine) deriving Show
+newtype Ibp = Ibp (BV.Vector IbpLine) deriving Show
 
 instance NFData SInt where
   rnf (SInt x) = rnf x 

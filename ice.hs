@@ -73,36 +73,36 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
 probeGauss :: forall s . Reifies s Int
             => BV.Vector (Row s)
             -> (Fp s Int, V.Vector Int, V.Vector Int)
-probeGauss !rs = probeStep (BV.indexed rs) 1 V.empty V.empty
+probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
 
 probeStep :: forall s . Reifies s Int
-             => BV.Vector (Int, Row s)
+             => [(Int, Row s)]
              -> Fp s Int
-             -> V.Vector Int
-             -> V.Vector Int
+             -> [Int]
+             -> [Int]
              -> (Fp s Int, V.Vector Int, V.Vector Int)
 probeStep !rs !d !j !i
-  | BV.null nonZeroRows = (d, j, i)
-  | otherwise = probeStep (BV.force rows') d' j' i'
+  | null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+  | otherwise = probeStep rows' d' j' i'
   where
-    nonZeroRows = BV.filter (not . V.null . snd) rs
-    pivotRowIndex = BV.minIndexBy
-                    (comparing (fst . V.head . snd)
-                     `mappend` comparing (V.length . snd))
-                    nonZeroRows
-    (x,y) = BV.splitAt pivotRowIndex nonZeroRows
-    pivotRow = BV.head y
-    rowsToModify = x BV.++ BV.tail y
+    pivotRowIndex = fst $ minimumBy
+                    (comparing (fst . V.head . snd . snd)
+                    `mappend` comparing (V.length . snd . snd))
+                    (zip [0..] rs)
+                    
+    (rows1, rows2) = splitAt pivotRowIndex rs
+    pivotRow = head rows2
+    rowsToModify = rows1 Data.List.++ tail rows2
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
     normalisedPivotRow = second (multRow invPivotElement) pivotRow
     d' = d * pivotElement
-    j' = V.snoc j pivotColumn
+    j' = pivotColumn:j
     pivotOperation (ind, row) =
       let (n,x) = V.head row
       in (if n == pivotColumn then (ind, addRows (multRow (-x) (snd normalisedPivotRow)) row) else (ind, row))
-    rows' = fmap pivotOperation rowsToModify
-    i' = V.snoc i (fst pivotRow)
+    rows' = filter (not . V.null . snd) . fmap pivotOperation  $ rowsToModify
+    i' = fst pivotRow:i
 
 
 
@@ -180,4 +180,9 @@ main = do
   mapM_ print reducibleIntegrals
   putStrLn "Integrals that cannot be reduced with these equations:"
   mapM_ print irreducibleIntegrals
+  putStr "The probability that this information is wrong is less than "
+  print (product [1- fromIntegral x / fromIntegral p | x <- [1..V.length i]] :: Double)
+  putStr "Other bound: "
+  print (let r = fromIntegral (V.length i)
+         in r* (r-1)/ (2 * fromIntegral p) :: Double)
   
