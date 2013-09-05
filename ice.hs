@@ -8,6 +8,7 @@ module Main
 
 import           Control.Arrow
 import           Control.DeepSeq
+-- import           Control.Exception
 import           Control.Monad
 import           Control.Monad.Random
 import qualified Data.Array.Repa as R
@@ -21,7 +22,7 @@ import           Data.Monoid
 import           Data.Numbers.Fp.Fp
 import           Data.Numbers.Fp.Matrix
 import           Data.Numbers.Fp.Polynomial.Multivariate
-import           Data.Numbers.Primes
+-- import           Data.Numbers.Primes
 import           Data.Ord
 import           Data.Proxy
 import           Data.Reflection
@@ -67,13 +68,48 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
             ( fromMaybe (error "integral not found.") (Map.lookup (ibpIntegral line) table)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
-
-
+-- | During Gaussian elimination, we want to keep the rows ordered.  First criterium is the column index of the first non-zero entry.  Next is the number of non-zero entries.  Otherwise, lines are compared by the rest of the column indices, with the original row number as tie-braker..
+lineKey :: (Int, Row s) -> (Int, Int)
+lineKey (i, x)
+  | V.null x = (0,0)
+  | otherwise = (fst (V.head x),i)
+-- lineKey :: (Int, Row s) -> [Int]
+-- lineKey (i, x)
+--   | V.null x = []
+--   | otherwise = fst (V.head x): V.length x: V.toList (V.snoc (V.map fst (V.tail x)) i)
 
 probeGauss :: forall s . Reifies s Int
             => BV.Vector (Row s)
             -> (Fp s Int, V.Vector Int, V.Vector Int)
 probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
+-- probeGauss rs = probeStep' (Map.fromList $ map (\ x -> (lineKey x, x)) (BV.toList $ BV.indexed rs)) 1 [] []
+
+probeStep' :: forall s . Reifies s Int
+              => Map.Map (Int, Int) (Int, Row s)
+              -> Fp s Int
+              -> [Int]
+              -> [Int]
+              -> (Fp s Int, V.Vector Int, V.Vector Int)
+{-# NOINLINE probeStep' #-}
+probeStep' !rs !d !j !i
+  | Map.null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+  | otherwise = {- (rs'', j', i') `deepseq`-}  probeStep' rs'' d' j' i'
+  where
+    ((pivotKey, (pivotIndex, pivotRow)), rs') = Map.deleteFindMin rs
+    (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > (1 + fst pivotKey,0)) rs'
+    -- (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > [head pivotKey + 1]) rs'
+    (pivotColumn, pivotElement) = V.head pivotRow
+    normalisedPivotRow = multRow (recip pivotElement) pivotRow
+    d' = d * pivotElement
+    j' = pivotColumn:j
+    i' = pivotIndex:i
+    pivotOperation :: (Int, Row s) -> (Int, Row s)
+    pivotOperation (ind, row) =
+      let (_,x) = V.head row
+      in (ind, addRows (multRow (-x) normalisedPivotRow) row)
+    newRows = filter (not . V.null . snd) (map (pivotOperation . snd) (Map.toList modRows))
+    rs'' = Map.fromList (map (\ x -> (lineKey x, x)) newRows) `Map.union` ignoreRows
+
 
 probeStep :: forall s . Reifies s Int
              => [(Int, Row s)]
@@ -82,6 +118,7 @@ probeStep :: forall s . Reifies s Int
              -> [Int]
              -> (Fp s Int, V.Vector Int, V.Vector Int)
 probeStep !rs !d !j !i
+-- probeStep rs d j i
   | null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
   | otherwise = probeStep rows' d' j' i'
   where
@@ -156,7 +193,7 @@ main = do
   -- putStrLn "Equations: "
   -- mapM_ print ibpRows
 
-  let p = 15485867 :: Int -- primes !! 1000000 :: Int
+  let p = 15485867 :: Int -- 32416190071 :: Int -- ((2 :: Int) ^ (31 :: Int))-1 -- 15485867 :: Int -- primes !! 1000000 :: Int
   xs <- V.generateM (length invariants) (\_ -> getRandomR (1,p))
   putStr "Probing for p = "
   print p
@@ -181,7 +218,7 @@ main = do
   putStrLn "Integrals that cannot be reduced with these equations:"
   mapM_ print irreducibleIntegrals
   putStr "The probability that this information is wrong is less than "
-  print (product [1- fromIntegral x / fromIntegral p | x <- [1..V.length i]] :: Double)
+  print (product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStr "Other bound: "
   print (let r = fromIntegral (V.length i)
          in r* (r-1)/ (2 * fromIntegral p) :: Double)
