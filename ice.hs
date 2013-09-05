@@ -7,8 +7,6 @@ module Main
        where
 
 import           Control.Arrow
-import           Control.DeepSeq
--- import           Control.Exception
 import           Control.Monad
 import           Control.Monad.Random
 import qualified Data.Array.Repa as R
@@ -200,7 +198,7 @@ main = do
   putStrLn "ice -- the Ibp ChoosEr"
   (eqFile:invariants) <- getArgs
   let invariants' = zip [0..] (map B.pack invariants)
-  equations <- withFile eqFile ReadMode $
+  equations <- liftM reverse $ withFile eqFile ReadMode $
                incrementy invariants'
   assertNFNamed "equations" equations
   let integralsUnorder = concatMap (BV.toList . getIntegrals) equations
