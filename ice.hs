@@ -28,12 +28,13 @@ import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
-import           Ice.ParseIbp -- (ibp)
--- import           GHC.AssertNF
+import           Ice.ParseIbp (ibp)
+import           GHC.AssertNF
 import           Data.Word (Word8)
 import           Ice.Types
 import           System.Environment
 import           System.IO
+import           System.IO.Unsafe
 
 -- driver for the parser.
 refill :: Handle -> IO B.ByteString
@@ -69,14 +70,14 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
 -- | During Gaussian elimination, we want to keep the rows ordered.  First criterium is the column index of the first non-zero entry.  Next is the number of non-zero entries.  Otherwise, lines are compared by the rest of the column indices, with the original row number as tie-braker..
-lineKey :: (Int, Row s) -> (Int, Int)
-lineKey (i, x)
-  | V.null x = (0,0)
-  | otherwise = (fst (V.head x),i)
--- lineKey :: (Int, Row s) -> [Int]
+-- lineKey :: (Int, Row s) -> (Int, Int)
 -- lineKey (i, x)
---   | V.null x = []
---   | otherwise = fst (V.head x): V.length x: V.toList (V.snoc (V.map fst (V.tail x)) i)
+--   | V.null x = (0,0)
+--   | otherwise = (fst (V.head x),i)
+lineKey :: (Int, Row s) -> [Int]
+lineKey (i, x)
+  | V.null x = []
+  | otherwise = fst (V.head x): V.length x: V.toList (V.snoc (V.map fst (V.tail x)) i)
 
 probeGauss :: forall s . Reifies s Int
             => BV.Vector (Row s)
@@ -84,31 +85,40 @@ probeGauss :: forall s . Reifies s Int
 probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
 -- probeGauss rs = probeStep' (Map.fromList $ map (\ x -> (lineKey x, x)) (BV.toList $ BV.indexed rs)) 1 [] []
 
-probeStep' :: forall s . Reifies s Int
-              => Map.Map (Int, Int) (Int, Row s)
-              -> Fp s Int
-              -> [Int]
-              -> [Int]
-              -> (Fp s Int, V.Vector Int, V.Vector Int)
-{-# NOINLINE probeStep' #-}
-probeStep' !rs !d !j !i
-  | Map.null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
-  | otherwise = {- (rs'', j', i') `deepseq`-}  probeStep' rs'' d' j' i'
-  where
-    ((pivotKey, (pivotIndex, pivotRow)), rs') = Map.deleteFindMin rs
-    (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > (1 + fst pivotKey,0)) rs'
-    -- (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > [head pivotKey + 1]) rs'
-    (pivotColumn, pivotElement) = V.head pivotRow
-    normalisedPivotRow = multRow (recip pivotElement) pivotRow
-    d' = d * pivotElement
-    j' = pivotColumn:j
-    i' = pivotIndex:i
-    pivotOperation :: (Int, Row s) -> (Int, Row s)
-    pivotOperation (ind, row) =
-      let (_,x) = V.head row
-      in (ind, addRows (multRow (-x) normalisedPivotRow) row)
-    newRows = filter (not . V.null . snd) (map (pivotOperation . snd) (Map.toList modRows))
-    rs'' = Map.fromList (map (\ x -> (lineKey x, x)) newRows) `Map.union` ignoreRows
+-- probeStep' :: forall s . Reifies s Int
+--               => Map.Map (Int, Int) (Int, Row s)
+--               -> Fp s Int
+--               -> [Int]
+--               -> [Int]
+--               -> (Fp s Int, V.Vector Int, V.Vector Int)
+-- {-# NOINLINE probeStep' #-}
+-- probeStep' !rs !d !j !i
+--   | Map.null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+--   | otherwise =
+--     -- unsafePerformIO (assertNFNamed "rs" rs'')
+--     -- `seq`
+--     -- unsafePerformIO (assertNFNamed "d" d')
+--     -- `seq`
+--     -- unsafePerformIO (assertNFNamed "j" j')
+--     -- `seq`
+--     -- unsafePerformIO (assertNFNamed "i" i')
+--     -- `seq`
+--     probeStep' rs'' d' j' i'
+--   where
+--     ((pivotKey, (pivotIndex, pivotRow)), rs') = Map.deleteFindMin rs
+--     (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > (1 + fst pivotKey,0)) rs'
+--     -- (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > [head pivotKey + 1]) rs'
+--     (pivotColumn, pivotElement) = V.head pivotRow
+--     normalisedPivotRow = multRow (recip pivotElement) pivotRow
+--     d' = d * pivotElement
+--     j' = pivotColumn:j
+--     i' = pivotIndex:i
+--     pivotOperation :: (Int, Row s) -> (Int, Row s)
+--     pivotOperation (ind, row) =
+--       let (_,x) = V.head row
+--       in (ind, addRows (multRow (-x) normalisedPivotRow) row)
+--     newRows = filter (not . V.null . snd) (map (pivotOperation . snd) (Map.toList modRows))
+--     rs'' = Map.fromList (map (\ x -> (lineKey x, x)) newRows) `Map.union` ignoreRows
 
 
 probeStep :: forall s . Reifies s Int
@@ -120,11 +130,25 @@ probeStep :: forall s . Reifies s Int
 probeStep !rs !d !j !i
 -- probeStep rs d j i
   | null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
-  | otherwise = probeStep rows' d' j' i'
+  | otherwise =
+    -- unsafePerformIO (assertNFNamed "rows" rows')
+    -- `seq`
+    -- unsafePerformIO (assertNFNamed "d" d')
+    -- `seq`
+    -- unsafePerformIO (assertNFNamed "j" j')
+    -- `seq`
+    -- unsafePerformIO (assertNFNamed "i" i')
+    -- `seq`
+    probeStep rows' d' j' i'
   where
-    pivotRowIndex = fst $ minimumBy
+    pivotRowIndex = fst $ minimumBy -- (comparing (lineKey . snd))
                     (comparing (fst . V.head . snd . snd)
-                    `mappend` comparing (V.length . snd . snd))
+                     `mappend` comparing (V.length . snd . snd)
+                     `mappend` comparing (\ (_,(_,l)) -> case V.length l of
+                                             1 -> 0
+                                             _ -> fst (l V.! 1) - fst (V.head l)
+                                         )
+                    )
                     (zip [0..] rs)
                     
     (rows1, rows2) = splitAt pivotRowIndex rs

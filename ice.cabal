@@ -42,7 +42,7 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 
-executable ice
+executable ice-dev
   -- .hs or .lhs file containing the Main module.
   main-is:             ice.hs
   -- ghc-options: -rtsopts -fllvm
@@ -57,7 +57,7 @@ executable ice
                      , primefield
                      , vector
                      , bytestring
---                     , ghc-heap-view
+                     , ghc-heap-view
                      , deepseq
                      , containers
                      , repa
