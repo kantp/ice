@@ -92,6 +92,7 @@ ibpLine xs = {-# SCC "ibpLine" #-} do
   char ' '
   char '*'
   char ' '
+  -- char ':'
   poly <- manyTill' (term xs) endOfLine -- (char '\n')
   let poly' = collectTerms (length xs) poly
   return $!

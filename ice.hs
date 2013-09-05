@@ -146,7 +146,7 @@ probeStep !rs !d !j !i
                      `mappend` comparing (V.length . snd . snd)
                      `mappend` comparing (\ (_,(_,l)) -> case V.length l of
                                              1 -> 0
-                                             _ -> fst (l V.! 1) - fst (V.head l)
+                                             _ -> - fst (l V.! 1)
                                          )
                     )
                     (zip [0..] rs)
@@ -156,12 +156,12 @@ probeStep !rs !d !j !i
     rowsToModify = rows1 Data.List.++ tail rows2
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
-    normalisedPivotRow = second (multRow invPivotElement) pivotRow
+    normalisedPivotRow = second (multRow invPivotElement . V.tail) pivotRow
     d' = d * pivotElement
     j' = pivotColumn:j
     pivotOperation (ind, row) =
       let (n,x) = V.head row
-      in (if n == pivotColumn then (ind, addRows (multRow (-x) (snd normalisedPivotRow)) row) else (ind, row))
+      in (if n == pivotColumn then (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row)) else (ind, row))
     rows' = filter (not . V.null . snd) . fmap pivotOperation  $ rowsToModify
     i' = fst pivotRow:i
 
