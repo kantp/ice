@@ -26,8 +26,8 @@ import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
-import           Ice.ParseIbp (ibp)
-import           GHC.AssertNF
+import           Ice.ParseIbp -- (ibp)
+-- import           GHC.AssertNF
 import           Data.Word (Word8)
 import           Ice.Types
 import           System.Environment
@@ -118,6 +118,13 @@ probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
 --     newRows = filter (not . V.null . snd) (map (pivotOperation . snd) (Map.toList modRows))
 --     rs'' = Map.fromList (map (\ x -> (lineKey x, x)) newRows) `Map.union` ignoreRows
 
+removeMinBy :: (a -> a -> Ordering) -> [a] -> (a, [a])
+{-# NOINLINE removeMinBy #-}
+removeMinBy cmp xs = foldl' getMin (head xs, []) (tail xs)
+  where getMin (!y,!ys) x = case cmp y x of
+          GT -> (x, y:ys)
+          _  -> (y, x:ys)
+
 
 probeStep :: forall s . Reifies s Int
              => [(Int, Row s)]
@@ -139,19 +146,15 @@ probeStep !rs !d !j !i
     -- `seq`
     probeStep rows' d' j' i'
   where
-    pivotRowIndex = fst $ minimumBy -- (comparing (lineKey . snd))
-                    (comparing (fst . V.head . snd . snd)
-                     `mappend` comparing (V.length . snd . snd)
-                     `mappend` comparing (\ (_,(_,l)) -> case V.length l of
-                                             1 -> 0
-                                             _ -> - fst (l V.! 1)
-                                         )
-                    )
-                    (zip [0..] rs)
-                    
-    (rows1, rows2) = splitAt pivotRowIndex rs
-    pivotRow = head rows2
-    rowsToModify = rows1 Data.List.++ tail rows2
+    (pivotRow, rowsToModify) = removeMinBy
+                               (comparing (fst . V.head . snd)
+                                `mappend` comparing (V.length . snd)
+                                `mappend` comparing (\ (_,l) -> case V.length l of
+                                                        1 -> 0
+                                                        _ -> - fst (l V.! 1)
+                                                    )
+                               )
+                               rs
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
     normalisedPivotRow = second (multRow invPivotElement . V.tail) pivotRow

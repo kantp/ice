@@ -57,7 +57,7 @@ executable ice-dev
                      , primefield
                      , vector
                      , bytestring
-                     , ghc-heap-view
+--                     , ghc-heap-view
                      , deepseq
                      , containers
                      , repa
