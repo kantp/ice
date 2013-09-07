@@ -13,6 +13,7 @@ import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map)
 import           Data.Attoparsec
 import qualified Data.ByteString.Char8 as B
+import           Data.Function (on)
 import           Data.List
 import qualified Data.Map as Map
 import           Data.Maybe
@@ -118,6 +119,9 @@ probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
 --     newRows = filter (not . V.null . snd) (map (pivotOperation . snd) (Map.toList modRows))
 --     rs'' = Map.fromList (map (\ x -> (lineKey x, x)) newRows) `Map.union` ignoreRows
 
+-- | Given a list and an ordering function, this function returns a
+-- pair consisting of the minimal element with respect to this
+-- ordering, and the rest of the list.
 removeMinBy :: (a -> a -> Ordering) -> [a] -> (a, [a])
 {-# NOINLINE removeMinBy #-}
 removeMinBy cmp xs = foldl' getMin (head xs, []) (tail xs)
@@ -125,6 +129,16 @@ removeMinBy cmp xs = foldl' getMin (head xs, []) (tail xs)
           GT -> (x, y:ys)
           _  -> (y, x:ys)
 
+-- | This is a variant of 'removeMinBy' that receives an additional
+-- equality test function.  It returns a triple of the minimal
+-- element, all elements that satisfy the predicate, and the rest.  It
+-- is assumed that @eq a b@ and @c LT a@ implies @not (eq c b)@.
+removeMinAndSplitBy :: (a -> a -> Ordering) -> (a -> a -> Bool) -> [a] -> (a, [a], [a])
+{-# NOINLINE removeMinAndSplitBy #-}
+removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
+  where getMin (!y,!ys, !zs) x = case cmp y x of
+          GT -> (x, [], y: (ys Data.List.++ zs))
+          _  -> if eq x y then (y, x:ys, zs) else (y, ys, x:zs)
 
 probeStep :: forall s . Reifies s Int
              => [(Int, Row s)]
@@ -146,15 +160,17 @@ probeStep !rs !d !j !i
     -- `seq`
     probeStep rows' d' j' i'
   where
-    (pivotRow, rowsToModify) = removeMinBy
-                               (comparing (fst . V.head . snd)
-                                `mappend` comparing (V.length . snd)
-                                `mappend` comparing (\ (_,l) -> case V.length l of
-                                                        1 -> 0
-                                                        _ -> - fst (l V.! 1)
-                                                    )
-                               )
-                               rs
+    (pivotRow, rowsToModify, ignoreRows) =
+      removeMinAndSplitBy
+      (comparing (fst . V.head . snd)
+       `mappend` comparing (V.length . snd)
+       `mappend` comparing (\ (_,l) -> case V.length l of
+                               1 -> 0
+                               _ -> - fst (l V.! 1)
+                           )
+      )
+      ((==) `on` (fst. V.head . snd))
+      rs
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
     normalisedPivotRow = second (multRow invPivotElement . V.tail) pivotRow
@@ -162,8 +178,8 @@ probeStep !rs !d !j !i
     j' = pivotColumn:j
     pivotOperation (ind, row) =
       let (n,x) = V.head row
-      in (if n == pivotColumn then (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row)) else (ind, row))
-    rows' = filter (not . V.null . snd) . fmap pivotOperation  $ rowsToModify
+      in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row))
+    rows' = (filter (not . V.null . snd) . fmap pivotOperation  $ rowsToModify) Data.List.++ ignoreRows
     i' = fst pivotRow:i
 
 
