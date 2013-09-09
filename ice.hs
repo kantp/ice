@@ -137,7 +137,7 @@ removeMinAndSplitBy :: (a -> a -> Ordering) -> (a -> a -> Bool) -> [a] -> (a, [a
 {-# NOINLINE removeMinAndSplitBy #-}
 removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
   where getMin (!y,!ys, !zs) x = case cmp y x of
-          GT -> (x, [], y: (ys Data.List.++ zs))
+          GT -> if eq x y then (x, y:ys, zs) else (x, [], y: (ys Data.List.++ zs))
           _  -> if eq x y then (y, x:ys, zs) else (y, ys, x:zs)
 
 probeStep :: forall s . Reifies s Int
@@ -179,7 +179,7 @@ probeStep !rs !d !j !i
     pivotOperation (ind, row) =
       let (n,x) = V.head row
       in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row))
-    rows' = (filter (not . V.null . snd) . fmap pivotOperation  $ rowsToModify) Data.List.++ ignoreRows
+    rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
     i' = fst pivotRow:i
 
 
