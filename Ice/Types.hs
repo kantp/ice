@@ -22,19 +22,15 @@ instance Ord SInt where
   compare (SInt x) (SInt y) = laportaOrdering y x where
     laportaOrdering :: V.Vector Int8 -> V.Vector Int8 -> Ordering
     laportaOrdering =
-      comparing (V.length . V.filter (/=0))
+      comparing (V.length . V.filter (/=0) . V.take 6) -- FIX: ugly, ugly hack: hardcoded number of propagators
       `mappend` comparing md
       `mappend` comparing mp
       `mappend` comparing (V.length . V.takeWhile (==0))
       `mappend` comparePropPowers
-      `mappend` compareSpPowers
-    mp xs = - V.sum (V.filter (<0) xs)
-    md xs = let xs' = V.filter (>0) xs
+    mp xs = - V.sum (V.drop 6 xs) -- FIX: same as above
+    md xs = let xs' = V.filter (>0) (V.take 6 xs) -- FIX: same as above
             in V.sum xs' - fromIntegral (V.length xs')
     comparePropPowers xs ys = mconcat (zipWith compare (V.toList xs) (V.toList ys))
-    scalProds xs = V.toList (V.map negate (V.filter (<0) xs))
-    compareSpPowers xs ys =
-      mconcat (zipWith compare (scalProds xs) (scalProds ys))
 
 --  | One term in a polynomial in the kinematic invariants and d
 data Term = Term !Int !(V.Vector Word8) deriving Show

@@ -27,6 +27,7 @@ import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
+import           Ice.ParseCrusher
 import           Ice.ParseIbp -- (ibp)
 -- import           GHC.AssertNF
 import           Data.Word (Word8)
@@ -39,13 +40,13 @@ import           System.IO.Unsafe
 refill :: Handle -> IO B.ByteString
 refill h = B.hGet h (4*1024)
 
-incrementy :: [(Int, B.ByteString)] -> Handle -> IO [Ibp]
+incrementy :: Parser Ibp -> Handle -> IO [Ibp]
 incrementy xs h = go (0 :: Int) [] =<< refill h
  where
    go n !acc is = do
      when (n `mod` 10000 == 0) ( putStr "Parsed equations: "
                                  >> print n)
-     r <- parseWith (refill h) (ibp xs) is
+     r <- parseWith (refill h) xs is
      case r of
        Fail _ _ msg -> error msg
        Done bs x
@@ -218,7 +219,7 @@ main = do
   (eqFile:invariants) <- getArgs
   let invariants' = zip [0..] (map B.pack invariants)
   equations <- liftM reverse $ withFile eqFile ReadMode $
-               incrementy invariants'
+               incrementy (ibpCrusher invariants')
   assertNFNamed "equations" equations
   let integralsUnorder = concatMap (BV.toList . getIntegrals) equations
       integrals = map fst $ (Map.toList . Map.fromList) (zip integralsUnorder (repeat ()))
@@ -252,8 +253,8 @@ main = do
   V.mapM_ print i
 
   let (reducibleIntegrals, irreducibleIntegrals) =
-        partition (\ i -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
-                         in V.elem n j) integrals
+        partition (\ (i,_) -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
+                          in V.elem n j) (zip integrals [0 :: Int ..])
   putStrLn "Integrals that can be reduced with these equations:"
   mapM_ print reducibleIntegrals
   putStrLn "Integrals that cannot be reduced with these equations:"
