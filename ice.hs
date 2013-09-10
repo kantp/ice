@@ -6,6 +6,7 @@ module Main
        (main)
        where
 
+import Control.Exception (assert)
 import           Control.Arrow
 import           Control.Monad
 import           Control.Monad.Random
@@ -80,44 +81,23 @@ lineKey (i, x)
 
 probeGauss :: forall s . Reifies s Int
             => BV.Vector (Row s)
-            -> (Fp s Int, V.Vector Int, V.Vector Int)
-probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
--- probeGauss rs = probeStep' (Map.fromList $ map (\ x -> (lineKey x, x)) (BV.toList $ BV.indexed rs)) 1 [] []
+            -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
+probeGauss !rs = let (fwd, d, j, i) = probeStep ([],  BV.toList $ BV.indexed rs) 1 [] []
+                     back = backGauss ([], fwd)
+                 in (back, d, j, i)
 
--- probeStep' :: forall s . Reifies s Int
---               => Map.Map (Int, Int) (Int, Row s)
---               -> Fp s Int
---               -> [Int]
---               -> [Int]
---               -> (Fp s Int, V.Vector Int, V.Vector Int)
--- {-# NOINLINE probeStep' #-}
--- probeStep' !rs !d !j !i
---   | Map.null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
---   | otherwise =
---     -- unsafePerformIO (assertNFNamed "rs" rs'')
---     -- `seq`
---     -- unsafePerformIO (assertNFNamed "d" d')
---     -- `seq`
---     -- unsafePerformIO (assertNFNamed "j" j')
---     -- `seq`
---     -- unsafePerformIO (assertNFNamed "i" i')
---     -- `seq`
---     probeStep' rs'' d' j' i'
---   where
---     ((pivotKey, (pivotIndex, pivotRow)), rs') = Map.deleteFindMin rs
---     (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > (1 + fst pivotKey,0)) rs'
---     -- (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > [head pivotKey + 1]) rs'
---     (pivotColumn, pivotElement) = V.head pivotRow
---     normalisedPivotRow = multRow (recip pivotElement) pivotRow
---     d' = d * pivotElement
---     j' = pivotColumn:j
---     i' = pivotIndex:i
---     pivotOperation :: (Int, Row s) -> (Int, Row s)
---     pivotOperation (ind, row) =
---       let (_,x) = V.head row
---       in (ind, addRows (multRow (-x) normalisedPivotRow) row)
---     newRows = filter (not . V.null . snd) (map (pivotOperation . snd) (Map.toList modRows))
---     rs'' = Map.fromList (map (\ x -> (lineKey x, x)) newRows) `Map.union` ignoreRows
+backGauss :: forall s . Reifies s Int
+             => ([V.Vector Int], [Row s])
+             -> [V.Vector Int]
+backGauss (!rsDone, []) = rsDone
+backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (V.map fst pivotRow:rsDone, rs')
+  where
+    (pivotColumn, invPivot) = second recip (V.head pivotRow)
+    rs' = map pivotOperation rs
+    pivotOperation row = case V.find ((==pivotColumn) . fst) row of
+      Nothing -> row
+      Just (_, elt) -> addRows (multRow (-elt*invPivot) pivotRow) row
+      
 
 -- | Given a list and an ordering function, this function returns a
 -- pair consisting of the minimal element with respect to this
@@ -141,24 +121,15 @@ removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
           _  -> if eq x y then (y, x:ys, zs) else (y, ys, x:zs)
 
 probeStep :: forall s . Reifies s Int
-             => [(Int, Row s)]
+             => ([Row s], [(Int, Row s)])
              -> Fp s Int
              -> [Int]
              -> [Int]
-             -> (Fp s Int, V.Vector Int, V.Vector Int)
-probeStep !rs !d !j !i
--- probeStep rs d j i
-  | null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+             -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
+probeStep (!rsDone, !rs) !d !j !i
+  | null rs = (rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
   | otherwise =
-    -- unsafePerformIO (assertNFNamed "rows" rows')
-    -- `seq`
-    -- unsafePerformIO (assertNFNamed "d" d')
-    -- `seq`
-    -- unsafePerformIO (assertNFNamed "j" j')
-    -- `seq`
-    -- unsafePerformIO (assertNFNamed "i" i')
-    -- `seq`
-    probeStep rows' d' j' i'
+    probeStep (rsDone', rows') d' j' i'
   where
     (pivotRow, rowsToModify, ignoreRows) =
       removeMinAndSplitBy
@@ -173,14 +144,15 @@ probeStep !rs !d !j !i
       rs
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
-    normalisedPivotRow = second (multRow invPivotElement . V.tail) pivotRow
+    normalisedPivotRow = second (multRow invPivotElement) pivotRow
     d' = d * pivotElement
     j' = pivotColumn:j
     pivotOperation (ind, row) =
-      let (n,x) = V.head row
-      in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row))
+      let (_,x) = V.head row
+      in (ind, addRows (multRow (-x) (V.tail $ snd normalisedPivotRow)) (V.tail row))
     rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
     i' = fst pivotRow:i
+    rsDone' = (snd normalisedPivotRow:rsDone)
 
 
 
@@ -199,18 +171,20 @@ testMatrix :: forall s . Reifies s Int
               => Int
               -> V.Vector Int
               -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
-              -> (Fp s Int, V.Vector Int, V.Vector Int)
+              -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
               -- -> (V.Vector Int, V.Vector Int)
-testMatrix n xs rs = (d,j,i) where
-  (d, j, i) = probeGauss (rows m)
+testMatrix n xs rs = (rs',d,j,i) where
+  (rs', d, j, i) = probeGauss (rows m)
   m = evalIbps n xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
-withMod :: Int -> (forall s . Reifies s Int => (Fp s Int, V.Vector Int, V.Vector Int))
-           -> (Int, V.Vector Int, V.Vector Int)
-withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: (Fp s Int, V.Vector Int, V.Vector Int))))
+withMod :: Int -> (forall s . Reifies s Int => ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int))
+           -> ([V.Vector Int], Int, V.Vector Int, V.Vector Int)
+withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int))))
 
-symmetricRep' (x,y,z) = (symmetricRep x,y,z)
+symmetricRep' (a,x,y,z) = (a,symmetricRep x,y,z)
+
+
 
 main :: IO ()
 main = do
@@ -241,7 +215,7 @@ main = do
   putStr "Random points: "
   print (V.toList xs)
   
-  let (d,j,i) = withMod p (testMatrix (length integrals) xs ibpRows)
+  let (rs',d,j,i) = withMod p (testMatrix (length integrals) xs ibpRows)
   putStr "d = "
   print d
   putStr "Number of linearly independent equations: "
@@ -253,14 +227,24 @@ main = do
 
   let (reducibleIntegrals, irreducibleIntegrals) =
         partition (\ i -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
-                         in V.elem n j) integrals
+                          in V.elem n j) integrals
   putStrLn "Integrals that can be reduced with these equations:"
   mapM_ print reducibleIntegrals
   putStrLn "Integrals that cannot be reduced with these equations:"
   mapM_ print irreducibleIntegrals
+  -- putStrLn "Sparsity pattern of row reduced form:"
+  -- mapM_ (print . V.toList) rs'
+  putStrLn "Final representations of the integrals will look like:"
+  mapM_ (printRow integralNumbers) rs'
   putStr "The probability that this information is wrong is less than "
   print (product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStr "Other bound: "
   print (let r = fromIntegral (V.length i)
          in r* (r-1)/ (2 * fromIntegral p) :: Double)
+    where printRow intmap r = do
+            putStr $ showIntegral intmap (V.head r)
+            putStr " -> {"
+            putStr (intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r)))
+            putStrLn "}"
+          showIntegral intmap n = let (elt, n') = Map.elemAt n intmap in assert (n==n') $ show elt
   
