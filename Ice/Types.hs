@@ -22,15 +22,37 @@ instance Ord SInt where
   compare (SInt x) (SInt y) = laportaOrdering y x where
     laportaOrdering :: V.Vector Int8 -> V.Vector Int8 -> Ordering
     laportaOrdering =
-      comparing (V.length . V.filter (/=0) . V.take 6) -- FIX: ugly, ugly hack: hardcoded number of propagators
+      cmpRS
+      `mappend` comparing (V.length . V.filter (>0))
       `mappend` comparing md
       `mappend` comparing mp
       `mappend` comparing (V.length . V.takeWhile (==0))
       `mappend` comparePropPowers
-    mp xs = - V.sum (V.drop 6 xs) -- FIX: same as above
-    md xs = let xs' = V.filter (>0) (V.take 6 xs) -- FIX: same as above
+    mp xs = - V.sum (V.filter (<0) xs)
+    md xs = let xs' = V.filter (>0) xs
             in V.sum xs' - fromIntegral (V.length xs')
     comparePropPowers xs ys = mconcat (zipWith compare (V.toList xs) (V.toList ys))
+    cmpRS x y
+      | rx && ry = EQ
+      | not rx && not ry = EQ
+      | rx = GT
+      | otherwise = LT
+      where
+        rx = mp x > 2 || md x > 1 -- FIXME: hardcoded limits
+        ry = mp y > 2 || md y > 1
+
+-- -- cmpRS :: SInt -> SInt -> Ordering
+-- cmpRS x y
+--   | rx && ry = EQ
+--   | not rx && not ry = EQ
+--   | rx = GT
+--   | otherwise = LT
+--   where rx = mp x > 2 || md x > 1 -- FIXME: hardcoded limits
+--         ry = mp y > 2 || md y > 1
+-- -- mp, md :: SInt -> Int8
+-- mp (xs) = V.sum (V.drop 6 xs) -- FIX: same as above
+-- md (xs) = let xs' = V.filter (>0) (V.take 6 xs) -- FIX: same as above
+--                in V.sum xs' - fromIntegral (V.length xs')
 
 --  | One term in a polynomial in the kinematic invariants and d
 data Term = Term !Int !(V.Vector Word8) deriving Show
