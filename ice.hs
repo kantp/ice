@@ -259,7 +259,7 @@ main = do
   putStrLn "Integrals that cannot be reduced with these equations:"
   mapM_ print irreducibleIntegrals
   putStr "The probability that this information is wrong is less than "
-  print (product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
+  print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStr "Other bound: "
   print (let r = fromIntegral (V.length i)
          in r* (r-1)/ (2 * fromIntegral p) :: Double)
