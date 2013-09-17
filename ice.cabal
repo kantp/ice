@@ -66,3 +66,4 @@ executable ice-dev
                      , primes
                      , MonadRandom
                      , tagged
+                     , cmdargs

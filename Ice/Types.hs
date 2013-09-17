@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 module Ice.Types
 
 where
@@ -11,6 +12,17 @@ import           Data.Ord
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Data.Word (Word8)
+import           System.Console.CmdArgs
+
+-- | Configuration via cmdargs library.
+data Config = Config { inputFile :: FilePath
+                     , dumpFile :: FilePath
+                     , intName :: String
+                     , intNumbers :: Bool
+                     , invariants :: [String]
+                     , rMax :: Int8
+                     , sMax :: Int8
+                     } deriving (Show, Data, Typeable)
 
 -- | A scalar integral is represented by its indices.
 newtype SInt = SInt (V.Vector Int8) deriving Eq
@@ -23,18 +35,21 @@ instance Ord SInt where
     laportaOrdering :: V.Vector Int8 -> V.Vector Int8 -> Ordering
     laportaOrdering =
       comparing (V.length . V.filter (/=0))
-      `mappend` comparing md
-      `mappend` comparing mp
+      `mappend` comparing (numDots . SInt)
+      `mappend` comparing (numSPs . SInt)
       `mappend` comparing (V.length . V.takeWhile (==0))
       `mappend` comparePropPowers
       `mappend` compareSpPowers
-    mp xs = - V.sum (V.filter (<0) xs)
-    md xs = let xs' = V.filter (>0) xs
-            in V.sum xs' - fromIntegral (V.length xs')
     comparePropPowers xs ys = mconcat (zipWith compare (V.toList xs) (V.toList ys))
     scalProds xs = V.toList (V.map negate (V.filter (<0) xs))
     compareSpPowers xs ys =
       mconcat (zipWith compare (scalProds xs) (scalProds ys))
+
+numDots :: SInt -> Int8
+numDots (SInt xs) = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
+
+numSPs :: SInt -> Int8
+numSPs (SInt xs) = - (V.sum . V.filter (<0) $ xs)
 
 --  | One term in a polynomial in the kinematic invariants and d
 data Term = Term !Int !(V.Vector Word8) deriving Show

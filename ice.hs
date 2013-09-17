@@ -21,6 +21,7 @@ import           Data.Monoid
 import           Data.Numbers.Fp.Fp
 import           Data.Numbers.Fp.Matrix
 import           Data.Numbers.Fp.Polynomial.Multivariate
+import           System.Console.CmdArgs
 -- import           Data.Numbers.Primes
 import           Data.Ord
 import           Data.Proxy
@@ -60,6 +61,13 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
+isBeyond :: Config -> SInt -> Bool
+isBeyond c (SInt xs) = r > rMax c || s > sMax c
+  where
+    r = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
+    s = - (V.sum . V.filter (<0) $ xs)
+
+
 ibpToRow :: Map.Map SInt Int -> Ibp -> BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))
 ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
   where
@@ -82,42 +90,6 @@ probeGauss :: forall s . Reifies s Int
             => BV.Vector (Row s)
             -> (Fp s Int, V.Vector Int, V.Vector Int)
 probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
--- probeGauss rs = probeStep' (Map.fromList $ map (\ x -> (lineKey x, x)) (BV.toList $ BV.indexed rs)) 1 [] []
-
--- probeStep' :: forall s . Reifies s Int
---               => Map.Map (Int, Int) (Int, Row s)
---               -> Fp s Int
---               -> [Int]
---               -> [Int]
---               -> (Fp s Int, V.Vector Int, V.Vector Int)
--- {-# NOINLINE probeStep' #-}
--- probeStep' !rs !d !j !i
---   | Map.null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
---   | otherwise =
---     -- unsafePerformIO (assertNFNamed "rs" rs'')
---     -- `seq`
---     -- unsafePerformIO (assertNFNamed "d" d')
---     -- `seq`
---     -- unsafePerformIO (assertNFNamed "j" j')
---     -- `seq`
---     -- unsafePerformIO (assertNFNamed "i" i')
---     -- `seq`
---     probeStep' rs'' d' j' i'
---   where
---     ((pivotKey, (pivotIndex, pivotRow)), rs') = Map.deleteFindMin rs
---     (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > (1 + fst pivotKey,0)) rs'
---     -- (modRows, ignoreRows) = Map.partitionWithKey (\ k _ -> k > [head pivotKey + 1]) rs'
---     (pivotColumn, pivotElement) = V.head pivotRow
---     normalisedPivotRow = multRow (recip pivotElement) pivotRow
---     d' = d * pivotElement
---     j' = pivotColumn:j
---     i' = pivotIndex:i
---     pivotOperation :: (Int, Row s) -> (Int, Row s)
---     pivotOperation (ind, row) =
---       let (_,x) = V.head row
---       in (ind, addRows (multRow (-x) normalisedPivotRow) row)
---     newRows = filter (not . V.null . snd) (map (pivotOperation . snd) (Map.toList modRows))
---     rs'' = Map.fromList (map (\ x -> (lineKey x, x)) newRows) `Map.union` ignoreRows
 
 -- | Given a list and an ordering function, this function returns a
 -- pair consisting of the minimal element with respect to this
@@ -147,17 +119,8 @@ probeStep :: forall s . Reifies s Int
              -> [Int]
              -> (Fp s Int, V.Vector Int, V.Vector Int)
 probeStep !rs !d !j !i
--- probeStep rs d j i
   | null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
   | otherwise =
-    -- unsafePerformIO (assertNFNamed "rows" rows')
-    -- `seq`
-    -- unsafePerformIO (assertNFNamed "d" d')
-    -- `seq`
-    -- unsafePerformIO (assertNFNamed "j" j')
-    -- `seq`
-    -- unsafePerformIO (assertNFNamed "i" i')
-    -- `seq`
     probeStep rows' d' j' i'
   where
     (pivotRow, rowsToModify, ignoreRows) =
@@ -212,11 +175,29 @@ withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: (Fp s Int, V.Vec
 
 symmetricRep' (x,y,z) = (symmetricRep x,y,z)
 
+
+config :: Config
+config = Config { inputFile = def &= args &= typ "FILE"
+                , dumpFile = def &= name "d" &= typFile &= help "File to dump a list of independent equation numbers to."
+                , intName = "Int" &= help "Name of the function representing an integral."
+                , intNumbers = False &= name "n" &= help "If set, use numbers instead of explicit integrals."
+                , invariants = def &= name "i" &= help "Symbols representing kinematic invariants."
+                , rMax = def &= help "Maximal number of dots expected to be reduced."
+                , sMax = def &= help "Maximal number of scalar products expected to be reduced."}
+         &= summary "ICE -- Integration-By-Parts Chooser of Equations"
+
+
 main :: IO ()
 main = do
+  configuration <- cmdArgs config
+  let eqFile = inputFile configuration
+      invs = invariants configuration
+
+  print configuration
+  
   putStrLn "ice -- the Ibp ChoosEr"
-  (eqFile:invariants) <- getArgs
-  let invariants' = zip [0..] (map B.pack invariants)
+  --   (eqFile:invariants) <- getArgs
+  let invariants' = zip [0..] (map B.pack invs)
   equations <- liftM reverse $ withFile eqFile ReadMode $
                incrementy invariants'
   assertNFNamed "equations" equations
@@ -235,7 +216,7 @@ main = do
   -- mapM_ print ibpRows
 
   let p = 15485867 :: Int -- 32416190071 :: Int -- ((2 :: Int) ^ (31 :: Int))-1 -- 15485867 :: Int -- primes !! 1000000 :: Int
-  xs <- V.generateM (length invariants) (\_ -> getRandomR (1,p))
+  xs <- V.generateM (length invs) (\_ -> getRandomR (1,p))
   putStr "Probing for p = "
   print p
   putStr "Random points: "
