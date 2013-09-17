@@ -6,6 +6,7 @@ module Main
        (main)
        where
 
+import Control.Exception (assert)
 import           Control.Arrow
 import           Control.Monad
 import           Control.Monad.Random
@@ -28,6 +29,7 @@ import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
+import           Ice.ParseCrusher
 import           Ice.ParseIbp -- (ibp)
 -- import           GHC.AssertNF
 import           Data.Word (Word8)
@@ -40,13 +42,13 @@ import           System.IO.Unsafe
 refill :: Handle -> IO B.ByteString
 refill h = B.hGet h (4*1024)
 
-incrementy :: [(Int, B.ByteString)] -> Handle -> IO [Ibp]
+incrementy :: Parser Ibp -> Handle -> IO [Ibp]
 incrementy xs h = go (0 :: Int) [] =<< refill h
  where
    go n !acc is = do
      when (n `mod` 10000 == 0) ( putStr "Parsed equations: "
                                  >> print n)
-     r <- parseWith (refill h) (ibp xs) is
+     r <- parseWith (refill h) xs is
      case r of
        Fail _ _ msg -> error msg
        Done bs x
@@ -61,13 +63,6 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
-isBeyond :: Config -> SInt -> Bool
-isBeyond c (SInt xs) = r > rMax c || s > sMax c
-  where
-    r = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
-    s = - (V.sum . V.filter (<0) $ xs)
-
-
 ibpToRow :: Map.Map SInt Int -> Ibp -> BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))
 ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
   where
@@ -76,21 +71,25 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
             ( fromMaybe (error "integral not found.") (Map.lookup (ibpIntegral line) table)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
--- | During Gaussian elimination, we want to keep the rows ordered.  First criterium is the column index of the first non-zero entry.  Next is the number of non-zero entries.  Otherwise, lines are compared by the rest of the column indices, with the original row number as tie-braker..
--- lineKey :: (Int, Row s) -> (Int, Int)
--- lineKey (i, x)
---   | V.null x = (0,0)
---   | otherwise = (fst (V.head x),i)
-lineKey :: (Int, Row s) -> [Int]
-lineKey (i, x)
-  | V.null x = []
-  | otherwise = fst (V.head x): V.length x: V.toList (V.snoc (V.map fst (V.tail x)) i)
-
 probeGauss :: forall s . Reifies s Int
             => BV.Vector (Row s)
-            -> (Fp s Int, V.Vector Int, V.Vector Int)
-probeGauss !rs = probeStep (BV.toList $ BV.indexed rs) 1 [] []
+            -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
+probeGauss !rs = let (fwd, d, j, i) = probeStep ([],  BV.toList $ BV.indexed rs) 1 [] []
+                     back = backGauss ([], fwd)
+                 in (back, d, j, i)
 
+backGauss :: forall s . Reifies s Int
+             => ([V.Vector Int], [Row s])
+             -> [V.Vector Int]
+backGauss (!rsDone, []) = rsDone
+backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (V.map fst pivotRow:rsDone, rs')
+  where
+    (pivotColumn, invPivot) = second recip (V.head pivotRow)
+    rs' = map pivotOperation rs
+    pivotOperation row = case V.find ((==pivotColumn) . fst) row of
+      Nothing -> row
+      Just (_, elt) -> addRows (multRow (-elt*invPivot) pivotRow) row
+      
 -- | Given a list and an ordering function, this function returns a
 -- pair consisting of the minimal element with respect to this
 -- ordering, and the rest of the list.
@@ -113,15 +112,15 @@ removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
           _  -> if eq x y then (y, x:ys, zs) else (y, ys, x:zs)
 
 probeStep :: forall s . Reifies s Int
-             => [(Int, Row s)]
+             => ([Row s], [(Int, Row s)])
              -> Fp s Int
              -> [Int]
              -> [Int]
-             -> (Fp s Int, V.Vector Int, V.Vector Int)
-probeStep !rs !d !j !i
-  | null rs = (d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+             -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
+probeStep (!rsDone, !rs) !d !j !i
+  | null rs = (rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
   | otherwise =
-    probeStep rows' d' j' i'
+    probeStep (rsDone', rows') d' j' i'
   where
     (pivotRow, rowsToModify, ignoreRows) =
       removeMinAndSplitBy
@@ -136,14 +135,15 @@ probeStep !rs !d !j !i
       rs
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
-    normalisedPivotRow = second (multRow invPivotElement . V.tail) pivotRow
+    normalisedPivotRow = second (multRow invPivotElement) pivotRow
     d' = d * pivotElement
     j' = pivotColumn:j
     pivotOperation (ind, row) =
-      let (n,x) = V.head row
-      in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row))
+      let (_,x) = V.head row
+      in (ind, addRows (multRow (-x) (V.tail $ snd normalisedPivotRow)) (V.tail row))
     rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
     i' = fst pivotRow:i
+    rsDone' = (snd normalisedPivotRow:rsDone)
 
 
 
@@ -162,18 +162,20 @@ testMatrix :: forall s . Reifies s Int
               => Int
               -> V.Vector Int
               -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
-              -> (Fp s Int, V.Vector Int, V.Vector Int)
+              -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
               -- -> (V.Vector Int, V.Vector Int)
-testMatrix n xs rs = (d,j,i) where
-  (d, j, i) = probeGauss (rows m)
+testMatrix n xs rs = (rs',d,j,i) where
+  (rs', d, j, i) = probeGauss (rows m)
   m = evalIbps n xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
-withMod :: Int -> (forall s . Reifies s Int => (Fp s Int, V.Vector Int, V.Vector Int))
-           -> (Int, V.Vector Int, V.Vector Int)
-withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: (Fp s Int, V.Vector Int, V.Vector Int))))
+withMod :: Int -> (forall s . Reifies s Int => ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int))
+           -> ([V.Vector Int], Int, V.Vector Int, V.Vector Int)
+withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int))))
 
-symmetricRep' (x,y,z) = (symmetricRep x,y,z)
+symmetricRep' (a,x,y,z) = (a,symmetricRep x,y,z)
+
+
 
 
 config :: Config
@@ -199,7 +201,7 @@ main = do
   --   (eqFile:invariants) <- getArgs
   let invariants' = zip [0..] (map B.pack invs)
   equations <- liftM reverse $ withFile eqFile ReadMode $
-               incrementy invariants'
+               incrementy (ibpCrusher invariants')
   assertNFNamed "equations" equations
   let integralsUnorder = concatMap (BV.toList . getIntegrals) equations
       integrals = map fst $ (Map.toList . Map.fromList) (zip integralsUnorder (repeat ()))
@@ -222,7 +224,7 @@ main = do
   putStr "Random points: "
   print (V.toList xs)
   
-  let (d,j,i) = withMod p (testMatrix (length integrals) xs ibpRows)
+  let (rs',d,j,i) = withMod p (testMatrix (length integrals) xs ibpRows)
   putStr "d = "
   print d
   putStr "Number of linearly independent equations: "
@@ -233,15 +235,25 @@ main = do
   V.mapM_ print i
 
   let (reducibleIntegrals, irreducibleIntegrals) =
-        partition (\ i -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
-                         in V.elem n j) integrals
+        partition (\ (i,_) -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
+                          in V.elem n j) (zip integrals [0 :: Int ..])
   putStrLn "Integrals that can be reduced with these equations:"
   mapM_ print reducibleIntegrals
   putStrLn "Integrals that cannot be reduced with these equations:"
   mapM_ print irreducibleIntegrals
+  -- putStrLn "Sparsity pattern of row reduced form:"
+  -- mapM_ (print . V.toList) rs'
+  putStrLn "Final representations of the integrals will look like:"
+  mapM_ (printRow integralNumbers) rs'
   putStr "The probability that this information is wrong is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStr "Other bound: "
   print (let r = fromIntegral (V.length i)
          in r* (r-1)/ (2 * fromIntegral p) :: Double)
+    where printRow intmap r = do
+            putStr $ showIntegral intmap (V.head r)
+            putStr " -> {"
+            putStr (intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r)))
+            putStrLn "}"
+          showIntegral intmap n = let (elt, n') = Map.elemAt n intmap in assert (n==n') $ show elt
   

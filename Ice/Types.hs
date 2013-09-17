@@ -33,23 +33,27 @@ instance Show SInt where
 instance Ord SInt where
   compare (SInt x) (SInt y) = laportaOrdering y x where
     laportaOrdering :: V.Vector Int8 -> V.Vector Int8 -> Ordering
-    laportaOrdering =
+    laportaOrdering = -- TODO: ensure that most complicated integrals are always hardest
       comparing (V.length . V.filter (/=0))
       `mappend` comparing (numDots . SInt)
       `mappend` comparing (numSPs . SInt)
       `mappend` comparing (V.length . V.takeWhile (==0))
       `mappend` comparePropPowers
       `mappend` compareSpPowers
-    comparePropPowers xs ys = mconcat (zipWith compare (V.toList xs) (V.toList ys))
-    scalProds xs = V.toList (V.map negate (V.filter (<0) xs))
-    compareSpPowers xs ys =
-      mconcat (zipWith compare (scalProds xs) (scalProds ys))
+    comparePropPowers xs ys = mconcat (zipWith (\ a b -> compare (max a 0) (max b 0)) (V.toList xs) (V.toList ys))
+    compareSpPowers xs ys = mconcat (zipWith (\ a b -> compare (max (- a) 0) (max (- b) 0)) (V.toList xs) (V.toList ys))
 
 numDots :: SInt -> Int8
 numDots (SInt xs) = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
 
 numSPs :: SInt -> Int8
 numSPs (SInt xs) = - (V.sum . V.filter (<0) $ xs)
+
+isBeyond :: Config -> SInt -> Bool
+isBeyond c (SInt xs) = r > rMax c || s > sMax c
+  where
+    r = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
+    s = - (V.sum . V.filter (<0) $ xs)
 
 --  | One term in a polynomial in the kinematic invariants and d
 data Term = Term !Int !(V.Vector Word8) deriving Show
