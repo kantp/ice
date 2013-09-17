@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TypeOperators #-}
 module Main
        (main)
        where
@@ -71,17 +72,15 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
             ( fromMaybe (error "integral not found.") (lookupInPair (ibpIntegral line) table)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
-probeGauss :: forall s . Reifies s Int
-            => BV.Vector (Row s)
-            -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
-probeGauss !rs = let (fwd, d, j, i) = probeStep ([],  BV.toList $ BV.indexed rs) 1 [] []
-                     back = backGauss ([], fwd)
-                 in (back, d, j, i)
+unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector Int])) -> [V.Vector Int]
+unwrapBackGauss p rs = let (x, res) =  reify p (\ (_ :: Proxy s) -> first symmetricRep (rs :: (Fp s Int, [V.Vector Int])))
+                       in res
+
 
 backGauss :: forall s . Reifies s Int
              => ([V.Vector Int], [Row s])
-             -> [V.Vector Int]
-backGauss (!rsDone, []) = rsDone
+             -> (Fp s Int, [V.Vector Int])
+backGauss (!rsDone, []) = (1, rsDone)
 backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (V.map fst pivotRow:rsDone, rs')
   where
     (pivotColumn, invPivot) = second recip (V.head pivotRow)
@@ -145,9 +144,6 @@ probeStep (!rsDone, !rs) !d !j !i
     i' = fst pivotRow:i
     rsDone' = (snd normalisedPivotRow:rsDone)
 
-
-
-
 evalIbps :: forall s . Reifies s Int
             => Int
             -> Array U DIM1 (Fp s Int)
@@ -158,25 +154,23 @@ evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   treatRow r = V.convert $ BV.map (second evalPoly) r
   evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map normalise cs) es)
 
-testMatrix :: forall s . Reifies s Int
-              => Int
-              -> V.Vector Int
-              -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
-              -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
-              -- -> (V.Vector Int, V.Vector Int)
-testMatrix n xs rs = (rs',d,j,i) where
-  (rs', d, j, i) = probeGauss (rows m)
+testMatrixFwd :: forall s . Reifies s Int
+                 => Int
+                 -> V.Vector Int
+                 -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
+                 -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
+                 -- -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
+                 -- -> (V.Vector Int, V.Vector Int)
+testMatrixFwd n xs rs = (rs',d,j,i) where
+  (rs', d, j, i) = probeStep ([], BV.toList $ BV.indexed (rows m)) 1 [] []
   m = evalIbps n xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
-withMod :: Int -> (forall s . Reifies s Int => ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int))
-           -> ([V.Vector Int], Int, V.Vector Int, V.Vector Int)
-withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int))))
+withMod :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int, V.Vector Int))
+           -> ([V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
+withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
 
-symmetricRep' (a,x,y,z) = (a,symmetricRep x,y,z)
-
-
-
+symmetricRep' (a,x,y,z) = (map (V.map (second symmetricRep)) a,symmetricRep x,y,z)
 
 config :: Config
 config = Config { inputFile = def &= args &= typ "FILE"
@@ -190,12 +184,10 @@ config = Config { inputFile = def &= args &= typ "FILE"
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
 
 
+both :: Arrow a => a b' c' -> a (b', b') (c', c')
 both f = f *** f
 
--- lookupInPair crit (map1, map2) k
---   | crit k = fromMaybe (error  "integral not found.") (Map.lookup map1 k)
---   | otherwise = Map.size map1 + fromMaybe (error  "integral not found.") (Map.lookup map2 k)
-
+lookupInPair :: Ord k => k -> (Map.Map k a, Map.Map k a) -> Maybe a
 lookupInPair k (m1, m2) =
   case Map.lookup k m1 of
     Nothing -> Map.lookup k m2
@@ -206,20 +198,21 @@ main = do
   c <- cmdArgs config
   let eqFile = inputFile c
       invs = invariants c
-
+  putStrLn "ICE -- Integration-By-Parts Chooser of Equations"
+  putStr "Command line arguments: "
   print c
-  
-  putStrLn "ice -- the Ibp ChoosEr"
-  --   (eqFile:invariants) <- getArgs
   let invariants' = zip [0..] (map B.pack invs)
   equations <- liftM reverse $ withFile eqFile ReadMode $
                incrementy (ibpCrusher invariants')
   assertNFNamed "equations" equations
-  let (outerIntegrals, innerIntegrals) = both (map fst . Map.toList . Map.fromList . (`zip` repeat ())) (partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations))
+  let (outerIntegrals, innerIntegrals) =
+        both (map fst . Map.toList . Map.fromList . (`zip` repeat ()))
+        (partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations))
+      nOuterIntegrals = length outerIntegrals
       integrals = uncurry (Data.List.++) (outerIntegrals, innerIntegrals)
-  -- let (outerIntegrals, innerIntegrals) = partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations)
-  --     integrals = map fst $ uncurry (Data.List.++) (both (Map.toList . Map.fromList . (`zip` repeat ())) (outerIntegrals, innerIntegrals))
-      integralNumbers = (both Map.fromList) (zip outerIntegrals [0 :: Int ..], zip innerIntegrals [length outerIntegrals ..])
+      integralNumbers = both Map.fromList
+                        ( zip outerIntegrals [0 :: Int ..]
+                        , zip innerIntegrals [nOuterIntegrals ..])
       ibpRows = map (ibpToRow integralNumbers)  equations
   putStr "Number of equations: "
   print (length equations)
@@ -228,7 +221,7 @@ main = do
   print (length integrals)
   putStrLn (concat ["Number of integrals beyond seed values r="
                    , show (rMax c), " s=", show (sMax c)
-                   , ": ", show (length outerIntegrals)])
+                   , ": ", show (nOuterIntegrals)])
 
   let p = 15485867 :: Int -- 32416190071 :: Int -- ((2 :: Int) ^ (31 :: Int))-1 -- 15485867 :: Int -- primes !! 1000000 :: Int
   xs <- V.generateM (length invs) (\_ -> getRandomR (1,p))
@@ -237,7 +230,7 @@ main = do
   putStr "Random points: "
   print (V.toList xs)
   
-  let (rs',d,j,i) = withMod p (testMatrix (length integrals) xs ibpRows)
+  let (rs',d,j,i) = withMod p (testMatrixFwd (length integrals) xs ibpRows)
   putStr "d = "
   print d
   putStr "Number of linearly independent equations: "
@@ -254,10 +247,17 @@ main = do
   mapM_ print reducibleIntegrals
   putStrLn "Integrals that cannot be reduced with these equations:"
   mapM_ print irreducibleIntegrals
-  -- putStrLn "Sparsity pattern of row reduced form:"
-  -- mapM_ (print . V.toList) rs'
-  putStrLn "Final representations of the integrals will look like:"
-  mapM_ (printRow integralNumbers) rs'
+
+
+  when (backsub c) $ do
+    putStrLn "Doing backward substitution."
+    let rs'' = unwrapBackGauss p $
+               backGauss ([],  map (V.map (second normalise))
+                                   ((reverse
+                                     . dropWhile ((<nOuterIntegrals) . fst . V.head)
+                                     . reverse) rs'))
+    putStrLn "Final representations of the integrals will look like:"
+    mapM_ (printRow integralNumbers) rs''
   putStr "The probability that this information is wrong is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStr "Other bound: "
