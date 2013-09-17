@@ -22,6 +22,7 @@ data Config = Config { inputFile :: FilePath
                      , invariants :: [String]
                      , rMax :: Int8
                      , sMax :: Int8
+                     , backsub :: Bool
                      } deriving (Show, Data, Typeable)
 
 -- | A scalar integral is represented by its indices.
@@ -33,7 +34,7 @@ instance Show SInt where
 instance Ord SInt where
   compare (SInt x) (SInt y) = laportaOrdering y x where
     laportaOrdering :: V.Vector Int8 -> V.Vector Int8 -> Ordering
-    laportaOrdering = -- TODO: ensure that most complicated integrals are always hardest
+    laportaOrdering =
       comparing (V.length . V.filter (/=0))
       `mappend` comparing (numDots . SInt)
       `mappend` comparing (numSPs . SInt)

@@ -63,12 +63,12 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
-ibpToRow :: Map.Map SInt Int -> Ibp -> BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))
+ibpToRow :: (Map.Map SInt Int, Map.Map SInt Int) -> Ibp -> BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))
 ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
   where
     row = map
           (\ line ->
-            ( fromMaybe (error "integral not found.") (Map.lookup (ibpIntegral line) table)
+            ( fromMaybe (error "integral not found.") (lookupInPair (ibpIntegral line) table)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
 probeGauss :: forall s . Reifies s Int
@@ -185,17 +185,29 @@ config = Config { inputFile = def &= args &= typ "FILE"
                 , intNumbers = False &= name "n" &= help "If set, use numbers instead of explicit integrals."
                 , invariants = def &= name "i" &= help "Symbols representing kinematic invariants."
                 , rMax = def &= help "Maximal number of dots expected to be reduced."
-                , sMax = def &= help "Maximal number of scalar products expected to be reduced."}
+                , sMax = def &= help "Maximal number of scalar products expected to be reduced."
+                , backsub = False &= help "Perform backward substitution to investigate which master integrals are needed to express certain integrals."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
 
 
+both f = f *** f
+
+-- lookupInPair crit (map1, map2) k
+--   | crit k = fromMaybe (error  "integral not found.") (Map.lookup map1 k)
+--   | otherwise = Map.size map1 + fromMaybe (error  "integral not found.") (Map.lookup map2 k)
+
+lookupInPair k (m1, m2) =
+  case Map.lookup k m1 of
+    Nothing -> Map.lookup k m2
+    x -> x
+
 main :: IO ()
 main = do
-  configuration <- cmdArgs config
-  let eqFile = inputFile configuration
-      invs = invariants configuration
+  c <- cmdArgs config
+  let eqFile = inputFile c
+      invs = invariants c
 
-  print configuration
+  print c
   
   putStrLn "ice -- the Ibp ChoosEr"
   --   (eqFile:invariants) <- getArgs
@@ -203,19 +215,20 @@ main = do
   equations <- liftM reverse $ withFile eqFile ReadMode $
                incrementy (ibpCrusher invariants')
   assertNFNamed "equations" equations
-  let integralsUnorder = concatMap (BV.toList . getIntegrals) equations
-      integrals = map fst $ (Map.toList . Map.fromList) (zip integralsUnorder (repeat ()))
-      integralNumbers = Map.fromList (zip integrals [0 :: Int ..])
+  let (outerIntegrals, innerIntegrals) = both (map fst . Map.toList . Map.fromList . (`zip` repeat ())) (partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations))
+      integrals = uncurry (Data.List.++) (outerIntegrals, innerIntegrals)
+  -- let (outerIntegrals, innerIntegrals) = partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations)
+  --     integrals = map fst $ uncurry (Data.List.++) (both (Map.toList . Map.fromList . (`zip` repeat ())) (outerIntegrals, innerIntegrals))
+      integralNumbers = (both Map.fromList) (zip outerIntegrals [0 :: Int ..], zip innerIntegrals [length outerIntegrals ..])
       ibpRows = map (ibpToRow integralNumbers)  equations
   putStr "Number of equations: "
   print (length equations)
   -- assertNFNamed "equations" equations
   putStr "Number of integrals: "
   print (length integrals)
-  -- putStrLn "Integrals: "
-  -- mapM_ print (Map.toList integralNumbers)
-  -- putStrLn "Equations: "
-  -- mapM_ print ibpRows
+  putStrLn (concat ["Number of integrals beyond seed values r="
+                   , show (rMax c), " s=", show (sMax c)
+                   , ": ", show (length outerIntegrals)])
 
   let p = 15485867 :: Int -- 32416190071 :: Int -- ((2 :: Int) ^ (31 :: Int))-1 -- 15485867 :: Int -- primes !! 1000000 :: Int
   xs <- V.generateM (length invs) (\_ -> getRandomR (1,p))
@@ -235,7 +248,7 @@ main = do
   V.mapM_ print i
 
   let (reducibleIntegrals, irreducibleIntegrals) =
-        partition (\ (i,_) -> let n = fromMaybe (error  "integral not found.") (Map.lookup i integralNumbers)
+        partition (\ (i,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair i integralNumbers)
                           in V.elem n j) (zip integrals [0 :: Int ..])
   putStrLn "Integrals that can be reduced with these equations:"
   mapM_ print reducibleIntegrals
@@ -251,9 +264,14 @@ main = do
   print (let r = fromIntegral (V.length i)
          in r* (r-1)/ (2 * fromIntegral p) :: Double)
     where printRow intmap r = do
+            print r
             putStr $ showIntegral intmap (V.head r)
             putStr " -> {"
             putStr (intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r)))
             putStrLn "}"
-          showIntegral intmap n = let (elt, n') = Map.elemAt n intmap in assert (n==n') $ show elt
+          showIntegral intmap n =
+            let (elt, n') = if n < Map.size (fst intmap)
+                            then Map.elemAt n (fst intmap)
+                            else Map.elemAt (n-Map.size (fst intmap)) (snd intmap)
+            in assert (n==n') $ show elt
   
