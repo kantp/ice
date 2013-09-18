@@ -67,3 +67,4 @@ executable ice-dev
                      , MonadRandom
                      , tagged
                      , cmdargs
+                     , time

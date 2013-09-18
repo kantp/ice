@@ -7,8 +7,8 @@ module Main
        (main)
        where
 
-import Control.Exception (assert)
 import           Control.Arrow
+import           Control.Exception (assert)
 import           Control.Monad
 import           Control.Monad.Random
 import qualified Data.Array.Repa as R
@@ -23,6 +23,7 @@ import           Data.Monoid
 import           Data.Numbers.Fp.Fp
 import           Data.Numbers.Fp.Matrix
 import           Data.Numbers.Fp.Polynomial.Multivariate
+import           Data.Time
 import           System.Console.CmdArgs
 -- import           Data.Numbers.Primes
 import           Data.Ord
@@ -205,6 +206,7 @@ main = do
   putStr "Command line arguments: "
   print c
   let invariants' = zip [0..] (map B.pack invs)
+  startParseTime <- getCurrentTime
   equations <- liftM reverse $ withFile eqFile ReadMode $
                incrementy (ibpCrusher invariants')
   assertNFNamed "equations" equations
@@ -238,16 +240,18 @@ main = do
   print p
   putStr "Random points: "
   print (V.toList xs)
-  
-  let (rs',_,j,i) = if cutseeds c
-                    then withMod p (testMatrixFwd (length integrals - nOuterIntegrals) xs ibpRows')
-                    else withMod p (testMatrixFwd (length integrals) xs ibpRows)
+  startReductionTime <- getCurrentTime
+  let (!rs',_,!j,!i) = if cutseeds c
+                       then withMod p (testMatrixFwd (length integrals - nOuterIntegrals) xs ibpRows')
+                       else withMod p (testMatrixFwd (length integrals) xs ibpRows)
+  endReductionTime <- getCurrentTime
   putStr "Number of linearly independent equations: "
   print (V.length i)
   -- putStr "Number of equations that can be dropped : "
   -- print (length equations - V.length i)
   putStrLn "Indices of linearly independent equations (starting at 0):"
   V.mapM_ print i
+  printEqnTime <- getCurrentTime
 
   let (reducibleIntegrals, irreducibleIntegrals) =
         partition (\ (i,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair i integralNumbers)
@@ -270,6 +274,14 @@ main = do
     mapM_ (printRow integralNumbers) rs''
   putStr "The probability that this information is wrong is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
+  putStrLn "Timings:"
+  putStr "Parsing: "
+  print $ diffUTCTime startReductionTime startParseTime
+  putStr "Solving Equations: "
+  print $ diffUTCTime endReductionTime startReductionTime
+  putStr "Printing Indices of Equations: "
+  print $ diffUTCTime printEqnTime endReductionTime
+
     where printRow intmap r = do
             print r
             putStr $ showIntegral intmap (V.head r)
