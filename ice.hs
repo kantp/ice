@@ -180,9 +180,12 @@ config = Config { inputFile = def &= args &= typ "FILE"
                 , invariants = def &= name "i" &= help "Symbols representing kinematic invariants."
                 , rMax = def &= help "Maximal number of dots expected to be reduced."
                 , sMax = def &= help "Maximal number of scalar products expected to be reduced."
-                , backsub = False &= help "Perform backward substitution to investigate which master integrals are needed to express certain integrals."}
+                , backsub = False &= help "Perform backward substitution to investigate which master integrals are needed to express certain integrals."
+                , cutseeds = False &= help "Only consider equations that do not involve integrals with more dots/scalar products than given by rMax/sMax."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
-
+         &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
+                    , "a maximal linearly independent subset."]
+         &= program "ice"
 
 both :: Arrow a => a b' c' -> a (b', b') (c', c')
 both f = f *** f
@@ -214,6 +217,7 @@ main = do
                         ( zip outerIntegrals [0 :: Int ..]
                         , zip innerIntegrals [nOuterIntegrals ..])
       ibpRows = map (ibpToRow integralNumbers)  equations
+      ibpRows' = map (BV.map (first (+ (-nOuterIntegrals)))) $ filter ((>= nOuterIntegrals) . BV.minimum . BV.map fst) ibpRows
   putStr "Number of equations: "
   print (length equations)
   -- assertNFNamed "equations" equations
@@ -221,18 +225,23 @@ main = do
   print (length integrals)
   putStrLn (concat ["Number of integrals beyond seed values r="
                    , show (rMax c), " s=", show (sMax c)
-                   , ": ", show (nOuterIntegrals)])
+                   , ": ", show nOuterIntegrals])
+  putStr "Number of integrals within the seed region: "
+  print (length innerIntegrals)
+  putStr "Number of equations involving no integrals beyond seed values: "
+  print $ length ibpRows'
 
-  let p = 15485867 :: Int -- 32416190071 :: Int -- ((2 :: Int) ^ (31 :: Int))-1 -- 15485867 :: Int -- primes !! 1000000 :: Int
+  let p = ((2 :: Int) ^ (31 :: Int))-1
+  -- let p = {- 15485867 :: Int -- -} 32416190071 :: Int -- ((2 :: Int) ^ (31 :: Int))-1 -- 15485867 :: Int -- primes !! 1000000 :: Int
   xs <- V.generateM (length invs) (\_ -> getRandomR (1,p))
   putStr "Probing for p = "
   print p
   putStr "Random points: "
   print (V.toList xs)
   
-  let (rs',d,j,i) = withMod p (testMatrixFwd (length integrals) xs ibpRows)
-  putStr "d = "
-  print d
+  let (rs',_,j,i) = if cutseeds c
+                    then withMod p (testMatrixFwd (length integrals - nOuterIntegrals) xs ibpRows')
+                    else withMod p (testMatrixFwd (length integrals) xs ibpRows)
   putStr "Number of linearly independent equations: "
   print (V.length i)
   -- putStr "Number of equations that can be dropped : "
@@ -247,7 +256,8 @@ main = do
   mapM_ print reducibleIntegrals
   putStrLn "Integrals that cannot be reduced with these equations:"
   mapM_ print irreducibleIntegrals
-
+  putStrLn "Possible Master Integrals:"
+  mapM_ print (filter ((>= nOuterIntegrals) . snd) irreducibleIntegrals)
 
   when (backsub c) $ do
     putStrLn "Doing backward substitution."
@@ -260,9 +270,6 @@ main = do
     mapM_ (printRow integralNumbers) rs''
   putStr "The probability that this information is wrong is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
-  putStr "Other bound: "
-  print (let r = fromIntegral (V.length i)
-         in r* (r-1)/ (2 * fromIntegral p) :: Double)
     where printRow intmap r = do
             print r
             putStr $ showIntegral intmap (V.head r)
