@@ -8,6 +8,7 @@ module Ice.ParseIbp
 import           Control.Applicative
 import           Control.DeepSeq
 import           Control.Monad
+import           Data.Array.Repa.Repr.Vector (V, fromListVector)
 import           Data.Attoparsec.Char8
 import qualified Data.ByteString as B
 import           Data.Maybe
@@ -40,7 +41,7 @@ power xs = {-# SCC "power" #-} do
     where
       stringInd (i,s) = string s *> return i
 
-coefficient :: Parser Int
+coefficient :: Parser Integer
 {-# INLINE coefficient #-}
 coefficient = {-# SCC "coefficient" #-} signed (option 1 decimal) <* option undefined (char '*')
 
@@ -70,12 +71,12 @@ indices = {-# SCC "indices" #-} do
     `seq`
     inds
 
-collectTerms :: Int -> [Term] -> (Array U DIM1 Int, Array U DIM2 Word8)
+collectTerms :: Int -> [Term] -> (Array V DIM1 Integer, Array U DIM2 Word8)
 {-# INLINE collectTerms #-}
 -- collectTerms [] = (fromUnboxed (Z :. 0) V.empty, fromUnboxed (Z :.0 :. 0) V.empty)
 collectTerms !nVars !ts =
   let !nTerms = length ts
-      !cfs = fromListUnboxed (Z :. nTerms) (map (\ (Term x _) -> x) ts)
+      !cfs = fromListVector (Z :. nTerms) (map (\ (Term x _) -> x) ts)
       !exps = fromUnboxed (Z :. nTerms :. nVars) (V.concat (map (\ (Term _ x) -> x) ts))
   in
    (unsafePerformIO $ assertNFNamed "cfArray" cfs)

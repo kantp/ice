@@ -34,6 +34,7 @@ import qualified Data.Vector.Unboxed as V
 import           Ice.ParseCrusher
 import           Ice.ParseIbp -- (ibp)
 -- import           GHC.AssertNF
+import           Data.Array.Repa.Repr.Vector (V, fromListVector)
 import           Data.Word (Word8)
 import           Ice.Types
 import           System.Environment
@@ -65,7 +66,7 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
-ibpToRow :: (Map.Map SInt Int, Map.Map SInt Int) -> Ibp -> BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))
+ibpToRow :: (Map.Map SInt Int, Map.Map SInt Int) -> Ibp -> BV.Vector (Int, (Array V DIM1 Integer, Array U DIM2 Word8))
 ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
   where
     row = map
@@ -143,22 +144,22 @@ probeStep (!rsDone, !rs) !d !j !i
       in (ind, addRows (multRow (-x) (V.tail $ snd normalisedPivotRow)) (V.tail row))
     rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
     i' = fst pivotRow:i
-    rsDone' = (snd normalisedPivotRow:rsDone)
+    rsDone' = snd normalisedPivotRow:rsDone
 
 evalIbps :: forall s . Reifies s Int
             => Int
             -> Array U DIM1 (Fp s Int)
-            -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
+            -> [BV.Vector (Int, (Array V DIM1 Integer, Array U DIM2 Word8))]
             -> Matrix s
 evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   rs' = BV.fromList (map treatRow rs)
   treatRow r = V.convert $ BV.map (second evalPoly) r
-  evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map normalise cs) es)
+  evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
 
 testMatrixFwd :: forall s . Reifies s Int
                  => Int
                  -> V.Vector Int
-                 -> [BV.Vector (Int, (Array U DIM1 Int, Array U DIM2 Word8))]
+                 -> [BV.Vector (Int, (Array V DIM1 Integer, Array U DIM2 Word8))]
                  -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
                  -- -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
                  -- -> (V.Vector Int, V.Vector Int)

@@ -5,6 +5,7 @@ where
 
 import           Control.DeepSeq
 import qualified Data.Array.Repa as R
+import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Int (Int8)
 import           Data.List (intercalate)
 import           Data.Monoid
@@ -13,7 +14,6 @@ import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Data.Word (Word8)
 import           System.Console.CmdArgs
-
 -- | Configuration via cmdargs library.
 data Config = Config { inputFile :: FilePath
                      , dumpFile :: FilePath
@@ -58,10 +58,10 @@ isBeyond c (SInt xs) = r > rMax c || s > sMax c
     s = - (V.sum . V.filter (<0) $ xs)
 
 --  | One term in a polynomial in the kinematic invariants and d
-data Term = Term !Int !(V.Vector Word8) deriving Show
+data Term = Term !Integer !(V.Vector Word8) deriving Show
 -- | One term in an IBP equation.
 data IbpLine = IbpLine { ibpIntegral :: !SInt
-                       , ibpCfs :: !(R.Array R.U R.DIM1 Int)
+                       , ibpCfs :: !(R.Array V R.DIM1 Integer)
                        , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
 -- | An IBP equation.
 newtype Ibp = Ibp (BV.Vector IbpLine) deriving Show
