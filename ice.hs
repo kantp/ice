@@ -153,7 +153,7 @@ evalIbps :: forall s . Reifies s Int
             -> Matrix s
 evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   rs' = BV.fromList (map treatRow rs)
-  treatRow r = V.convert $ BV.map (second evalPoly) r
+  treatRow r = V.filter ((/=0) . snd) $ V.convert $ BV.map (second evalPoly) r
   evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
 
 testMatrixFwd :: forall s . Reifies s Int
