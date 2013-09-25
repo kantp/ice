@@ -25,15 +25,12 @@ import           Data.Numbers.Fp.Matrix
 import           Data.Numbers.Fp.Polynomial.Multivariate
 import           Data.Time
 import           System.Console.CmdArgs
--- import           Data.Numbers.Primes
 import           Data.Ord
 import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
-import           Ice.ParseCrusher
-import           Ice.ParseIbp -- (ibp)
--- import           GHC.AssertNF
+import           Ice.ParseIbp
 import           Data.Array.Repa.Repr.Vector (V, fromListVector)
 import           Data.Word (Word8)
 import           Ice.Types
@@ -54,12 +51,11 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
        Fail _ _ msg -> error msg
        Done bs x
            | B.null bs -> do
-              assertNFNamed "parse result" x
               s <- refill h
               if B.null s
                 then return $! (x:acc)
                 else go (n+1) (x:acc) s
-           | otherwise -> assertNFNamed "parse result" x >> go (n+1) (x:acc) bs
+           | otherwise -> go (n+1) (x:acc) bs
 
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
@@ -200,8 +196,7 @@ main = do
   let invariants' = zip [0..] (map B.pack invs)
   startParseTime <- getCurrentTime
   equations <- liftM reverse $ withFile eqFile ReadMode $
-               incrementy (ibpCrusher invariants')
-  assertNFNamed "equations" equations
+               incrementy (ibp invariants')
   let (outerIntegrals, innerIntegrals) =
         both (map fst . Map.toList . Map.fromList . (`zip` repeat ()))
         (partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations))
@@ -214,7 +209,6 @@ main = do
       ibpRows' = map (BV.map (first (+ (-nOuterIntegrals)))) $ filter ((>= nOuterIntegrals) . BV.minimum . BV.map fst) ibpRows
   putStr "Number of equations: "
   print (length equations)
-  -- assertNFNamed "equations" equations
   putStr "Number of integrals: "
   print (length integrals)
   putStrLn (concat ["Number of integrals beyond seed values r="
