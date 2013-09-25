@@ -137,12 +137,12 @@ probeStep (!rsDone, !rs) !d !j !i
       rs
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
-    normalisedPivotRow = second (multRow invPivotElement . V.tail) pivotRow
+    normalisedPivotRow = second (multRow invPivotElement) pivotRow
     d' = d * pivotElement
     j' = pivotColumn:j
     pivotOperation (ind, row) =
       let (n,x) = V.head row
-      in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row))
+      in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) row)
     rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
     i' = (fst . fst $ pivotRow) :i
     rsDone' = snd normalisedPivotRow:rsDone
@@ -283,7 +283,6 @@ main = do
   print $ diffUTCTime endReductionTime startReductionTime
 
     where printRow intmap r = do
-            print r
             putStr $ showIntegral intmap (V.head r)
             putStr " -> {"
             putStr (intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r)))
