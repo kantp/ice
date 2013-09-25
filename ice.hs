@@ -20,9 +20,7 @@ import           Data.List
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Numbers.Fp.Fp
-import           Data.Numbers.Fp.Matrix
-import           Data.Numbers.Fp.Polynomial.Multivariate
+import           Ice.Fp
 import           Data.Time
 import           System.Console.CmdArgs
 import           Data.Ord

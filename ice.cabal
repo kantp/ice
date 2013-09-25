@@ -45,7 +45,6 @@ cabal-version:       >=1.8
 executable ice-dev
   -- .hs or .lhs file containing the Main module.
   main-is:             ice.hs
-  -- ghc-options: -rtsopts -fllvm
   -- ghc-options: -Odph -rtsopts -fno-liberate-case -funfolding-use-threshold1000 -funfolding-keeness-factor1000 -fllvm -optlo-O3
   ghc-options: -Odph -rtsopts -fllvm -optlo-O3
   
@@ -55,15 +54,12 @@ executable ice-dev
   -- Other library packages from which modules are imported.
   build-depends:       base ==4.6.*
                      , attoparsec
-                     , primefield
                      , vector
                      , bytestring
---                     , ghc-heap-view
                      , deepseq
                      , containers
                      , repa
                      , reflection
-                     , primes
                      , MonadRandom
                      , tagged
                      , cmdargs

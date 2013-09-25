@@ -1,0 +1,143 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE StandaloneDeriving #-}
+-- | F_p, the field of integers modulo the prime p.
+module Ice.Fp
+  ( Fp ()
+  , unFp, symmetricRep
+  , getModulus
+  , normalise
+  , Row, Matrix (..), multRow, addRows
+  , Poly (..), multiEval
+  )  where
+
+import           Control.Arrow (second)
+import           Data.Array.Repa as R
+import           Data.Array.Repa.Eval (Elt)
+import           Data.Proxy
+import           Data.Reflection
+import qualified Data.Vector as BV
+import           Data.Vector.Generic.Base
+import           Data.Vector.Generic.Mutable
+import qualified Data.Vector.Unboxed as V
+import           Data.Word (Word8)
+
+-- | Use the reflection package to implement modular arithmetic.  The
+--   type @s@ keeps track of the modulus, while @a@ is the actual
+--   datatype we want to perform arithmetic with.
+newtype Fp s a = Fp a deriving (Show, Eq, Ord)
+
+deriving instance (Vector V.Vector a) => Vector V.Vector (Fp s a)
+deriving instance (MVector V.MVector a) => MVector V.MVector (Fp s a)
+deriving instance (V.Unbox a) => V.Unbox (Fp s a)
+deriving instance (Elt a) => Elt (Fp s a)
+
+-- | unwrap data from the 'Fp' wrapper.
+unFp :: Fp s a -> a
+{-# INLINE unFp #-}
+unFp (Fp a) = a
+
+-- | Return the symmetric representation of a modular number.
+symmetricRep :: (Reifies s a, Integral a) => Fp s a -> a
+symmetricRep x
+  | x' > halfModulus = x' - modulus
+  | x' < - halfModulus = x' + modulus
+  | otherwise = x'
+  where modulus = getModulus x
+        halfModulus = modulus `div` 2
+        x' = unFp x
+
+-- | Inject a value into a modular computation.
+normalise :: forall s a . (Reifies s a, Integral a) => a -> Fp s a
+{-# INLINE normalise #-}
+normalise !a = Fp (a `mod` reflect (undefined :: Proxy s))
+
+-- | Determine the modulus used in a calculation.
+getModulus :: forall s a . (Reifies s a) => Fp s a -> a
+getModulus _ = reflect (undefined :: Proxy s)
+
+instance (Reifies s a, Integral a) => Num (Fp s a) where
+  {-# SPECIALIZE instance (Reifies s Int) => Num (Fp s Int) #-}
+  Fp a + Fp b = normalise (a + b)
+  Fp a * Fp b = normalise (a * b)
+  negate (Fp a) = normalise (negate a)
+  fromInteger 0 = Fp 0
+  fromInteger 1 = Fp 1
+  fromInteger a = Fp (fromInteger $ a `mod` fromIntegral (reflect (undefined :: Proxy s)))
+  signum = error "signum in finite field"
+  abs = error "abs in finite field"
+
+instance (Reifies s a, Integral a) => Fractional (Fp s a) where
+  {-# SPECIALIZE instance (Reifies s Int) => Fractional (Fp s Int) #-}
+  recip = modInv
+  fromRational = error "trying to convert rational to F_p"
+
+-- | Modular inverse.
+modInv :: (Reifies s t, Integral t) => Fp s t -> Fp s t
+modInv x = let (_, inverse, _) = eea (unFp x) (getModulus x)
+           in normalise inverse
+
+-- | Sparse row of a matrix.  First entry of any pair is the column
+-- index, snd entry the value.
+type Row s = V.Vector (Int, Fp s Int)
+-- | Matrix in compressed row format.
+data Matrix s = Matrix { nCols :: !Int
+                       , rows :: !(BV.Vector (Row s)) }
+                deriving (Show, Eq)
+
+{-# INLINE multRow #-}
+multRow 0 _ = V.empty
+multRow !x !row = V.map (second (*x)) row
+
+{-# INLINE addRows #-}
+addRows !r1 !r2 = V.unfoldr step (r1, r2) where
+  step (x, y)
+    | V.null x && V.null y = Nothing
+    | V.null x = Just (V.head y, (x, V.tail y))
+    | V.null y = Just (V.head x, (V.tail x, y))
+    | otherwise =
+      let (xi, xval) = V.head x
+          (yi, yval) = V.head y
+      in case compare xi yi of
+        LT -> Just ((xi, xval), (V.tail x, y))
+        GT -> Just ((yi, yval), (x, V.tail y))
+        EQ -> case xval + yval of
+          0 -> step (V.tail x, V.tail y)
+          val -> Just ((xi, val), (V.tail x, V.tail y))
+
+data Poly s = Poly { cfs :: !(Array U DIM1 (Fp s Int))
+                   , exps :: !(Array U DIM2 Word8) } deriving (Eq, Show)
+
+-- | Evaluation of a multivariate polynomial.
+multiEval :: forall s . Reifies s Int
+  => Array U DIM1 (Fp s Int)
+  -> Poly s
+  -> Fp s Int
+multiEval !xs !p =
+  let (i:._) = extent (exps p)
+      xs' = extend (i:.All) xs
+      powers = R.zipWith (^) xs' (exps p)
+      monomials = R.foldS (*) 1 powers
+      terms = R.zipWith (*) (cfs p) monomials
+  in foldAllS (+) 0 terms
+
+-- | Extended Euklid's Algorithm
+eea :: (Integral a) => a -> a -> (a,a,a)
+{-# INLINE eea #-}
+eea !a !b = eea' (abs a) (abs b) 1 0 0 1 where
+  eea' !c !0 !c1 !_ !c2 !_ = ( abs c
+                       , c1 `div` (signum a*signum c)
+                       , c2 `div` (signum b*signum c) )
+  eea' !c !d !c1 !d1 !c2 !d2 =
+    let
+      q = c `div` d
+      r = c - q * d
+      r1 = c1 - q * d1
+      r2 = c2 - q * d2
+    in
+     eea' d r d1 r1 d2 r2
