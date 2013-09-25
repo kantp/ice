@@ -44,10 +44,11 @@ term xs = {-# SCC "term" #-} do
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i {- (xs !! i) -} factors)
   return $! Term cf expos
 
-indices :: Parser (V.Vector Int8)
+indices :: B.ByteString -> Parser (V.Vector Int8)
 {-# INLINE indices #-}
-indices = {-# SCC "indices" #-} do
-  string "Int["
+indices intName = {-# SCC "indices" #-} do
+  string intName
+  char '['
   !inds <- liftM V.fromList $ sepBy (signed decimal) (char ',')
   char ']'
   return $! inds
@@ -61,18 +62,18 @@ collectTerms !nVars !ts =
       !exps = fromUnboxed (Z :. nTerms :. nVars) (V.concat (map (\ (Term _ x) -> x) ts))
   in (cfs, exps)
 
-ibpLine :: [(Int, B.ByteString)] -> Parser IbpLine
+ibpLine :: B.ByteString -> [(Int, B.ByteString)] -> Parser IbpLine
 {-# INLINE ibpLine #-}
-ibpLine xs = {-# SCC "ibpLine" #-} do
-  inds <- indices
+ibpLine intName xs = {-# SCC "ibpLine" #-} do
+  inds <- indices intName
   string "*("
   poly <- manyTill' (term xs) ((char ')') >> endOfLine) -- (char '\n')
   let poly' = collectTerms (length xs) poly
   return $! IbpLine (SInt inds) (fst poly') (snd poly') -- (BV.fromList poly)
 
-ibp :: [(Int, B.ByteString)] -> Parser Ibp
-ibp xs = do
-  !lines <- manyTill' (ibpLine xs) (char ';')
+ibp :: B.ByteString -> [(Int, B.ByteString)] -> Parser Ibp
+ibp intName xs = do
+  !lines <- manyTill' (ibpLine intName xs) (char ';')
   endOfLine
   return $! Ibp (BV.force $ BV.fromList lines)
 

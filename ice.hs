@@ -196,7 +196,7 @@ main = do
   let invariants' = zip [0..] (map B.pack invs)
   startParseTime <- getCurrentTime
   equations <- liftM reverse $ withFile eqFile ReadMode $
-               incrementy (ibp invariants')
+               incrementy (ibp (B.pack $ intName c) invariants')
   let (outerIntegrals, innerIntegrals) =
         both (map fst . Map.toList . Map.fromList . (`zip` repeat ()))
         (partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations))
