@@ -37,9 +37,7 @@ import           Ice.ParseIbp -- (ibp)
 import           Data.Array.Repa.Repr.Vector (V, fromListVector)
 import           Data.Word (Word8)
 import           Ice.Types
-import           System.Environment
 import           System.IO
-import           System.IO.Unsafe
 
 -- driver for the parser.
 refill :: Handle -> IO B.ByteString
@@ -91,20 +89,11 @@ backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (V.map fst pivotRow:rsDone, rs'
       Nothing -> row
       Just (_, elt) -> addRows (multRow (-elt*invPivot) pivotRow) row
       
--- | Given a list and an ordering function, this function returns a
--- pair consisting of the minimal element with respect to this
--- ordering, and the rest of the list.
-removeMinBy :: (a -> a -> Ordering) -> [a] -> (a, [a])
-{-# NOINLINE removeMinBy #-}
-removeMinBy cmp xs = foldl' getMin (head xs, []) (tail xs)
-  where getMin (!y,!ys) x = case cmp y x of
-          GT -> (x, y:ys)
-          _  -> (y, x:ys)
-
--- | This is a variant of 'removeMinBy' that receives an additional
--- equality test function.  It returns a triple of the minimal
--- element, all elements that satisfy the predicate, and the rest.  It
--- is assumed that @eq a b@ and @c LT a@ implies @not (eq c b)@.
+-- | Given an ordering and an equality check, partition a list into a
+-- triplet of
+-- 1. the minimal element w.r.t. the ordering
+-- 2. a list of all elements that are equal to 1. with regard to the equality check
+-- 3. a list of all other elements.
 removeMinAndSplitBy :: (a -> a -> Ordering) -> (a -> a -> Bool) -> [a] -> (a, [a], [a])
 {-# NOINLINE removeMinAndSplitBy #-}
 removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
@@ -141,7 +130,7 @@ probeStep (!rsDone, !rs) !d !j !i
     d' = d * pivotElement
     j' = pivotColumn:j
     pivotOperation (ind, row) =
-      let (n,x) = V.head row
+      let (_,x) = V.head row
       in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) row)
     rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
     i' = (fst . fst $ pivotRow) :i
@@ -277,7 +266,7 @@ main = do
   putStr "The probability that this information is wrong is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStrLn "Timings:"
-  putStr "Parsing: "
+  putStr "Parsing and preparing equations: "
   print $ diffUTCTime startReductionTime startParseTime
   putStr "Solving Equations: "
   print $ diffUTCTime endReductionTime startReductionTime
