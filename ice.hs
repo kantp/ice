@@ -75,7 +75,7 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
 unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector Int])) -> [V.Vector Int]
-unwrapBackGauss p rs = let (x, res) =  reify p (\ (_ :: Proxy s) -> first symmetricRep (rs :: (Fp s Int, [V.Vector Int])))
+unwrapBackGauss p rs = let (_, res) =  reify p (\ (_ :: Proxy s) -> first symmetricRep (rs :: (Fp s Int, [V.Vector Int])))
                        in res
 
 
@@ -113,7 +113,10 @@ removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
           _  -> if eq x y then (y, x:ys, zs) else (y, ys, x:zs)
 
 probeStep :: forall s . Reifies s Int
-             => ([Row s], [(Int, Row s)])
+             => ([Row s], [((Int, (Int, Int)), Row s)])
+             -- ^ ([finished rows], [( Line number
+             --                      , ( original number of terms in equation
+             --                      , original index of most complicated integral), equation)])
              -> Fp s Int
              -> [Int]
              -> [Int]
@@ -125,25 +128,23 @@ probeStep (!rsDone, !rs) !d !j !i
   where
     (pivotRow, rowsToModify, ignoreRows) =
       removeMinAndSplitBy
-      (comparing (fst . V.head . snd)
-       `mappend` comparing (V.length . snd)
-       `mappend` comparing (\ (_,l) -> case V.length l of
-                               1 -> 0
-                               _ -> - fst (l V.! 1)
-                           )
+      (comparing (fst . V.head . snd) -- first column with non-zero entry
+       `mappend` flip (comparing (snd . snd . fst)) -- originally most com;plicated integral
+       `mappend` comparing (fst . snd . fst) -- original number of terms in equation
+       `mappend` comparing (fst . fst) -- line number as tie braker
       )
       ((==) `on` (fst. V.head . snd))
       rs
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     invPivotElement = recip pivotElement
-    normalisedPivotRow = second (multRow invPivotElement) pivotRow
+    normalisedPivotRow = second (multRow invPivotElement . V.tail) pivotRow
     d' = d * pivotElement
     j' = pivotColumn:j
     pivotOperation (ind, row) =
-      let (_,x) = V.head row
-      in (ind, addRows (multRow (-x) (V.tail $ snd normalisedPivotRow)) (V.tail row))
+      let (n,x) = V.head row
+      in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) (V.tail row))
     rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
-    i' = fst pivotRow:i
+    i' = (fst . fst $ pivotRow) :i
     rsDone' = snd normalisedPivotRow:rsDone
 
 evalIbps :: forall s . Reifies s Int
@@ -164,7 +165,8 @@ testMatrixFwd :: forall s . Reifies s Int
                  -- -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
                  -- -> (V.Vector Int, V.Vector Int)
 testMatrixFwd n xs rs = (rs',d,j,i) where
-  (rs', d, j, i) = probeStep ([], BV.toList $ BV.indexed (rows m)) 1 [] []
+--   (rs', d, j, i) = probeStep ([], BV.toList $ BV.indexed (rows m)) 1 [] []
+  (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ i v -> ((i,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
   m = evalIbps n xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
@@ -245,14 +247,13 @@ main = do
   let (!rs',_,!j,!i) = if cutseeds c
                        then withMod p (testMatrixFwd (length integrals - nOuterIntegrals) xs ibpRows')
                        else withMod p (testMatrixFwd (length integrals) xs ibpRows)
-  endReductionTime <- getCurrentTime
   putStr "Number of linearly independent equations: "
   print (V.length i)
   -- putStr "Number of equations that can be dropped : "
   -- print (length equations - V.length i)
   putStrLn "Indices of linearly independent equations (starting at 0):"
   V.mapM_ print i
-  printEqnTime <- getCurrentTime
+  endReductionTime <- getCurrentTime
 
   let (reducibleIntegrals, irreducibleIntegrals) =
         partition (\ (i,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair i integralNumbers)
@@ -280,8 +281,6 @@ main = do
   print $ diffUTCTime startReductionTime startParseTime
   putStr "Solving Equations: "
   print $ diffUTCTime endReductionTime startReductionTime
-  putStr "Printing Indices of Equations: "
-  print $ diffUTCTime printEqnTime endReductionTime
 
     where printRow intmap r = do
             print r
