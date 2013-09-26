@@ -67,6 +67,6 @@ ibpLine intName xs = do
 ibp :: B.ByteString -> [(Int, B.ByteString)] -> Parser Ibp
 ibp intName xs = do
   !lines <- manyTill' (ibpLine intName xs) (char ';')
-  endOfLine
+  skipSpace
   return $! Ibp (BV.force $ BV.fromList lines)
 
