@@ -24,29 +24,25 @@ import           Data.Word (Word8)
 import           System.IO.Unsafe (unsafePerformIO)
 
 power :: [(Int, B.ByteString)] -> Parser (Int, Word8)
-{-# INLINE power #-}
-power xs = {-# SCC "power" #-} do
+power xs = do
   !coeff <- asum (map stringInd xs)
   expo <- option 1 $ char '^' *> decimal
-  return $! (coeff, expo)
+  return (coeff, expo)
     where
       stringInd (i,s) = string s *> return i
 
 coefficient :: Parser Integer
-{-# INLINE coefficient #-}
-coefficient = {-# SCC "coefficient" #-} signed (option 1 decimal) <* option undefined (char '*')
+coefficient = signed (option 1 decimal) <* option undefined (char '*')
 
 term :: [(Int, B.ByteString)] -> Parser Term
-{-# INLINE term #-}
-term xs = {-# SCC "term" #-} do
+term xs = do
   !cf <- coefficient
   factors <- sepBy' (power xs) (char '*')
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i {- (xs !! i) -} factors)
   return $! Term cf expos
 
 indices :: B.ByteString -> Parser (V.Vector Int8)
-{-# INLINE indices #-}
-indices intName = {-# SCC "indices" #-} do
+indices intName = do
   string intName
   char '['
   !inds <- liftM V.fromList $ sepBy (signed decimal) (char ',')
@@ -54,8 +50,6 @@ indices intName = {-# SCC "indices" #-} do
   return $! inds
 
 collectTerms :: Int -> [Term] -> (Array V DIM1 Integer, Array U DIM2 Word8)
-{-# INLINE collectTerms #-}
--- collectTerms [] = (fromUnboxed (Z :. 0) V.empty, fromUnboxed (Z :.0 :. 0) V.empty)
 collectTerms !nVars !ts =
   let !nTerms = length ts
       !cfs = fromListVector (Z :. nTerms) (map (\ (Term x _) -> x) ts)
@@ -63,13 +57,12 @@ collectTerms !nVars !ts =
   in (cfs, exps)
 
 ibpLine :: B.ByteString -> [(Int, B.ByteString)] -> Parser IbpLine
-{-# INLINE ibpLine #-}
-ibpLine intName xs = {-# SCC "ibpLine" #-} do
+ibpLine intName xs = do
   inds <- indices intName
   string "*("
-  poly <- manyTill' (term xs) ((char ')') >> endOfLine) -- (char '\n')
+  poly <- manyTill' (term xs) (char ')' >> endOfLine) -- (char '\n')
   let poly' = collectTerms (length xs) poly
-  return $! IbpLine (SInt inds) (fst poly') (snd poly') -- (BV.fromList poly)
+  return $ uncurry (IbpLine (SInt inds)) poly'
 
 ibp :: B.ByteString -> [(Int, B.ByteString)] -> Parser Ibp
 ibp intName xs = do

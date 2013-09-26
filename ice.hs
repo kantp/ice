@@ -238,9 +238,10 @@ main = do
   putStr "Random points: "
   print (V.toList xs)
   startReductionTime <- getCurrentTime
-  let (!rs',_,!j,!i) = if cutseeds c
-                       then withMod p (testMatrixFwd (length integrals - nOuterIntegrals) xs ibpRows')
-                       else withMod p (testMatrixFwd (length integrals) xs ibpRows)
+  let (!rs',_,!j,!i) = withMod p
+                       ( if cutseeds c
+                         then testMatrixFwd (length integrals - nOuterIntegrals) xs ibpRows'
+                         else testMatrixFwd (length integrals) xs ibpRows)
   putStr "Number of linearly independent equations: "
   print (V.length i)
   -- putStr "Number of equations that can be dropped : "

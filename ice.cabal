@@ -45,7 +45,6 @@ cabal-version:       >=1.8
 executable ice-dev
   -- .hs or .lhs file containing the Main module.
   main-is:             ice.hs
-  -- ghc-options: -Odph -rtsopts -fno-liberate-case -funfolding-use-threshold1000 -funfolding-keeness-factor1000 -fllvm -optlo-O3
   ghc-options: -Odph -rtsopts -fllvm -optlo-O3
   
   -- Modules included in this executable, other than Main.
