@@ -167,8 +167,7 @@ config = Config { inputFile = def &= args &= typ "FILE"
                 , invariants = def &= name "i" &= help "Symbols representing kinematic invariants."
                 , rMax = def &= help "Maximal number of dots expected to be reduced."
                 , sMax = def &= help "Maximal number of scalar products expected to be reduced."
-                , backsub = False &= help "Perform backward substitution to investigate which master integrals are needed to express certain integrals."
-                , cutseeds = False &= help "Only consider equations that do not involve integrals with more dots/scalar products than given by rMax/sMax."}
+                , backsub = False &= help "Perform backward substitution to investigate which master integrals are needed to express certain integrals."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
          &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
                     , "a maximal linearly independent subset."]
@@ -238,10 +237,7 @@ main = do
   putStr "Random points: "
   print (V.toList xs)
   startReductionTime <- getCurrentTime
-  let (!rs',_,!j,!i) = withMod p
-                       ( if cutseeds c
-                         then testMatrixFwd (length integrals - nOuterIntegrals) xs ibpRows'
-                         else testMatrixFwd (length integrals) xs ibpRows)
+  let (!rs',_,!j,!i) = withMod p $ testMatrixFwd (length integrals) xs ibpRows
   putStr "Number of linearly independent equations: "
   print (V.length i)
   -- putStr "Number of equations that can be dropped : "
@@ -249,9 +245,10 @@ main = do
   putStrLn "Indices of linearly independent equations (starting at 0):"
   V.mapM_ print i
   endReductionTime <- getCurrentTime
+  when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) (V.toList i)))
 
   let (reducibleIntegrals, irreducibleIntegrals) =
-        partition (\ (i,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair i integralNumbers)
+        partition (\ (k,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair k integralNumbers)
                           in V.elem n j) (zip integrals [0 :: Int ..])
   putStrLn "Integrals that can be reduced with these equations:"
   mapM_ print reducibleIntegrals
