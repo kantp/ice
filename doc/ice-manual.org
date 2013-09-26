@@ -5,7 +5,7 @@
 #+DESCRIPTION:
 #+KEYWORDS:
 #+LANGUAGE:  en
-#+OPTIONS:   H:3 num:t toc:t \n:nil @:t ::t |:t ^:t -:t f:t *:t <:t
+#+OPTIONS:   H:3 num:t toc:nil \n:nil @:t ::t |:t ^:t -:t f:t *:t <:t
 #+OPTIONS:   TeX:t LaTeX:t skip:nil d:nil todo:t pri:nil tags:not-in-toc
 #+INFOJS_OPT: view:nil toc:nil ltoc:t mouse:underline buttons:0 path:http://orgmode.org/org-info.js
 #+EXPORT_SELECT_TAGS: export
@@ -28,11 +28,9 @@ to cite this paper when the program is used in a calculation leading
 to a scientific publication.
 #+END_abstract
 
-* Purpose of the Program
-...
 * Installation
 The easiest way to compile the program from source is to use the cabal
-build system.  It is included in the Haskell Platform, which is
+build system.  It is included in the Haskell Platform[fn:http://www.haskell.org/platform/], which is
 available on most modern systems, including GNU/Linux, Windows, and
 OS/X.  If you have the Haskell Platform installed, the following
 commands, executed from the sourcedirectory, will install all needed
@@ -42,13 +40,17 @@ cabal install --only-dependencies
 cabal configure
 cabal build
 #+END_SRC
-This will create the executable file ./dist/build/ice/ice.
+This will create the executable file =./dist/build/ice/ice=.
 Alternatively, there are binary executables for some systems available
 from
 
 http://www.physik.hu-berlin.de/pep/tools.
-* Syntax of Input Files
-* Command Line Arguments
+* Usage
+ICE is run as
+#+BEGIN_SRC shell
+ice [OPTIONS] [FILE]
+#+END_SRC
+where the following options are available:
 - =-d --dumpfile=FILE= :: In addition to the output on stdout, print
      a list of newline-separated equation numbers to =FILE=.  Note
      that the equations are zero-indexed.
@@ -60,8 +62,23 @@ http://www.physik.hu-berlin.de/pep/tools.
 - =-b --backsub= :: After forward substitution, perform backward
      substitution in order to determine which master
      integrals appear in the result for each integral.
-- =-r --rmax=n= :: 
-- =-s --smax=n= ::
+- =-r --rmax=n=, =-s --smax=n= :: Only relevant if =--backsub= is
+     given.  Do not try to find a representation for integrals with
+     more than =rmax= dots or more than =smax= scalar products.  A
+     system of IBP equations will typically contain some integrals
+     with many dots and/or scalar products (more than the integrals
+     used as seeds in the generation of the system) that can not be
+     determined by the system, but are not master integrals and could
+     be reduced if the system was enlarged.  Discarding those before
+     the backward substitution saves some time.
+The input file =FILE= should have the following syntax:
+- Each line gives one term in an equation in the form 
+  \\
+  =Int[<indices>]*(<sum of coefficients>)=
+  \\ The brackets are mandatory.
+- Equations are terminated and separated by a line consisting of only
+  a semicolon.
+For an example, see the following section.
 * Example: One-Loop Massive Self-Energy
 
 #+CAPTION: One-Loop massive self-energy
@@ -70,7 +87,7 @@ http://www.physik.hu-berlin.de/pep/tools.
 [[./se1l.eps]] 
 In order to illustrate the usage of the program, we give a
 simple example input file for the reduction of the diagram shown
-in\nbsp\ref{fig:se1l}.  The input file with the equations is found in
+in Figure\nbsp\ref{fig:se1l}.  The input file with the equations is found in
 =example/se1l.in=.  It contains equations to reduce one scalar product
 and one dot, with invariants =d= and =m=.  The command line to run ICE
 on this file is
@@ -93,8 +110,8 @@ Command line arguments: Config {inputFile = "example/se1l.in"
 Number of equations: 8
 Number of integrals: 8
 Number of integrals within r=1, s=1: 4
-Probing for p = 3036999487
-Random points: [54498325,66450230]
+Probing for p = 3036998761
+Random points: [2887887967,690347565]
 Number of linearly independent equations: 7
 Indices of linearly independent equations (starting at 0):
 5
@@ -105,20 +122,21 @@ Indices of linearly independent equations (starting at 0):
 3
 2
 Integrals that can be reduced with these equations:
-(I(2,-1),4)
-(I(1,-1),5)
-(I(2,0),6)
+Int[2,-1]
+Int[1,-1]
+Int[2,0]
 Possible Master Integrals:
-(I(1,0),7)
+Int[1,0]
 Doing backward substitution.
 Final representations of the integrals will look like:
-I(2,-1) -> {I(1,0)}
-I(1,-1) -> {I(1,0)}
-I(2,0) -> {I(1,0)}
-The probability that this information is wrong is less than 9.219626284640015e-9
+Int[2,-1] -> {Int[1,0]}
+Int[1,-1] -> {Int[1,0]}
+Int[2,0] -> {Int[1,0]}
+The probability that too many equations were discarded
+ is less than 9.219628172019156e-9
 Timings:
-Parsing and preparing equations: 0.00052s
-Solving Equations: 0.000384s
+Parsing and preparing equations: 0.000514s
+Solving Equations: 0.000517s
 #+END_SRC
 First, ICE reports the values of the command line arguments given.
 Next, the number of equations and integrals, as well as the number of
@@ -136,6 +154,9 @@ Finally, we get information on which integrals were reduced and which
 are considered master integrals.  In case the =--backsub= option is
 given, ICE also gives a lists of which master integrals appear in the
 expression for each integral that could be reduced.
+
+#+LATEX:\printbibliography{}
+
 # ** Two-Loop Massive Self-Energy
 # #+CAPTION: Two-Loop massive self-energy
 # #+ATTR_LaTeX: width=0.25\textwidth
