@@ -237,9 +237,9 @@ main = do
         partition (\ (k,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair k integralNumbers)
                           in V.elem n j) (drop nOuterIntegrals $ zip integrals [0 :: Int ..])
   putStrLn "Integrals that can be reduced with these equations:"
-  mapM_ print reducibleIntegrals
+  mapM_ (print . fst) reducibleIntegrals
   putStrLn "Possible Master Integrals:"
-  mapM_ print irreducibleIntegrals
+  mapM_ (print . fst) irreducibleIntegrals
 
   when (backsub c) $ do
     putStrLn "Doing backward substitution."
@@ -250,7 +250,7 @@ main = do
                                      . reverse) rs'))
     putStrLn "Final representations of the integrals will look like:"
     mapM_ (printRow integralNumbers) rs''
-  putStr "The probability that this information is wrong is less than "
+  putStr "The probability that too many equations were discarded is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStrLn "Timings:"
   putStr "Parsing and preparing equations: "

@@ -27,7 +27,7 @@ data Config = Config { inputFile :: FilePath
 -- | A scalar integral is represented by its indices.
 newtype SInt = SInt (V.Vector Int8) deriving Eq
 instance Show SInt where
-  show (SInt xs) = "I(" ++ intercalate "," (map show $ V.toList xs) ++ ")"
+  show (SInt xs) = "Int[" ++ intercalate "," (map show $ V.toList xs) ++ "]"
 
 -- | Scalar integrals are ordered as in Laporta's paper, in decreasing order.
 instance Ord SInt where
