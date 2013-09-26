@@ -23,8 +23,8 @@
 This is the manual of ICE, a program to choose a maximal linearly
 independent subset from a given set of Integration-by-Parts and/or
 Lorentz Invariance equations.  The algorithm it implements is
-described in \cite{solve}, and the author considers it good practice
-to cite this paper when the program is used in a calculation leading
+described in\nbsp\cite{solve}, and the author considers it good practice
+to cite that paper when the program is used in a calculation leading
 to a scientific publication.
 #+END_abstract
 
@@ -41,10 +41,10 @@ cabal configure
 cabal build
 #+END_SRC
 This will create the executable file =./dist/build/ice/ice=.
-Alternatively, there are binary executables for some systems available
-from
+# Alternatively, there are binary executables for some systems available
+# from
 
-http://www.physik.hu-berlin.de/pep/tools.
+# http://www.physik.hu-berlin.de/pep/tools.
 * Usage
 ICE is run as
 #+BEGIN_SRC shell
