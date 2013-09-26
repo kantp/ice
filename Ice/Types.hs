@@ -18,11 +18,10 @@ import           System.Console.CmdArgs
 data Config = Config { inputFile :: FilePath
                      , dumpFile :: FilePath
                      , intName :: String
-                     , intNumbers :: Bool
                      , invariants :: [String]
+                     , backsub :: Bool
                      , rMax :: Int8
                      , sMax :: Int8
-                     , backsub :: Bool
                      } deriving (Show, Data, Typeable)
 
 -- | A scalar integral is represented by its indices.

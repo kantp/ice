@@ -29,7 +29,7 @@ import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Ice.ParseIbp
-import           Data.Array.Repa.Repr.Vector (V, fromListVector)
+import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Word (Word8)
 import           Ice.Types
 import           System.IO
@@ -42,7 +42,7 @@ incrementy :: Parser Ibp -> Handle -> IO [Ibp]
 incrementy xs h = go (0 :: Int) [] =<< refill h
  where
    go n !acc is = do
-     when (n `mod` 10000 == 0) ( putStr "Parsed equations: "
+     when (n > 0 && n `mod` 10000 == 0) ( putStr "Parsed equations: "
                                  >> print n)
      r <- parseWith (refill h) xs is
      case r of
@@ -67,9 +67,8 @@ ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
 
 unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector Int])) -> [V.Vector Int]
-unwrapBackGauss p rs = let (_, res) =  reify p (\ (_ :: Proxy s) -> first symmetricRep (rs :: (Fp s Int, [V.Vector Int])))
+unwrapBackGauss p rs = let (_, res) =  reify p (\ (_ :: Proxy s) -> first unFp {-symmetricRep-} (rs :: (Fp s Int, [V.Vector Int])))
                        in res
-
 
 backGauss :: forall s . Reifies s Int
              => ([V.Vector Int], [Row s])
@@ -89,7 +88,6 @@ backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (V.map fst pivotRow:rsDone, rs'
 -- 2. a list of all elements that are equal to 1. with regard to the equality check
 -- 3. a list of all other elements.
 removeMinAndSplitBy :: (a -> a -> Ordering) -> (a -> a -> Bool) -> [a] -> (a, [a], [a])
-{-# NOINLINE removeMinAndSplitBy #-}
 removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
   where getMin (!y,!ys, !zs) x = case cmp y x of
           GT -> if eq x y then (x, y:ys, zs) else (x, [], y: (ys Data.List.++ zs))
@@ -145,25 +143,20 @@ testMatrixFwd :: forall s . Reifies s Int
                  -> V.Vector Int
                  -> [BV.Vector (Int, (Array V DIM1 Integer, Array U DIM2 Word8))]
                  -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
-                 -- -> ([V.Vector Int], Fp s Int, V.Vector Int, V.Vector Int)
-                 -- -> (V.Vector Int, V.Vector Int)
 testMatrixFwd n xs rs = (rs',d,j,i) where
---   (rs', d, j, i) = probeStep ([], BV.toList $ BV.indexed (rows m)) 1 [] []
-  (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ i v -> ((i,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
+  (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ k v -> ((k,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
   m = evalIbps n xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
 withMod :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int, V.Vector Int))
            -> ([V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
 withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
-
-symmetricRep' (a,x,y,z) = (map (V.map (second symmetricRep)) a,symmetricRep x,y,z)
+  where symmetricRep' (rs,d,j,i) = (map (V.map (second unFp)) rs,unFp d,j,i)
 
 config :: Config
 config = Config { inputFile = def &= args &= typ "FILE"
                 , dumpFile = def &= name "d" &= typFile &= help "File to dump a list of independent equation numbers to."
                 , intName = "Int" &= help "Name of the function representing an integral."
-                , intNumbers = False &= name "n" &= help "If set, use numbers instead of explicit integrals."
                 , invariants = def &= name "i" &= help "Symbols representing kinematic invariants."
                 , rMax = def &= help "Maximal number of dots expected to be reduced."
                 , sMax = def &= help "Maximal number of scalar products expected to be reduced."
@@ -203,18 +196,13 @@ main = do
                         ( zip outerIntegrals [0 :: Int ..]
                         , zip innerIntegrals [nOuterIntegrals ..])
       ibpRows = map (ibpToRow integralNumbers)  equations
-      ibpRows' = map (BV.map (first (+ (-nOuterIntegrals)))) $ filter ((>= nOuterIntegrals) . BV.minimum . BV.map fst) ibpRows
   putStr "Number of equations: "
   print (length equations)
   putStr "Number of integrals: "
   print (length integrals)
-  putStrLn (concat ["Number of integrals beyond seed values r="
-                   , show (rMax c), " s=", show (sMax c)
-                   , ": ", show nOuterIntegrals])
-  putStr "Number of integrals within the seed region: "
-  print (length innerIntegrals)
-  putStr "Number of equations involving no integrals beyond seed values: "
-  print $ length ibpRows'
+  putStrLn (concat ["Number of integrals within r="
+                   , show (rMax c), ", s=", show (sMax c)
+                   , ": ", show (length innerIntegrals)])
   let pList = [3036998333,3036998347,3036998381,3036998401,3036998429,3036998449,3036998477
               ,3036998537,3036998561,3036998563,3036998567,3036998599,3036998611,3036998717
               ,3036998743,3036998759,3036998761,3036998777,3036998803,3036998837,3036998843
@@ -240,8 +228,6 @@ main = do
   let (!rs',_,!j,!i) = withMod p $ testMatrixFwd (length integrals) xs ibpRows
   putStr "Number of linearly independent equations: "
   print (V.length i)
-  -- putStr "Number of equations that can be dropped : "
-  -- print (length equations - V.length i)
   putStrLn "Indices of linearly independent equations (starting at 0):"
   V.mapM_ print i
   endReductionTime <- getCurrentTime
@@ -249,13 +235,11 @@ main = do
 
   let (reducibleIntegrals, irreducibleIntegrals) =
         partition (\ (k,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair k integralNumbers)
-                          in V.elem n j) (zip integrals [0 :: Int ..])
+                          in V.elem n j) (drop nOuterIntegrals $ zip integrals [0 :: Int ..])
   putStrLn "Integrals that can be reduced with these equations:"
   mapM_ print reducibleIntegrals
-  putStrLn "Integrals that cannot be reduced with these equations:"
-  mapM_ print irreducibleIntegrals
   putStrLn "Possible Master Integrals:"
-  mapM_ print (filter ((>= nOuterIntegrals) . snd) irreducibleIntegrals)
+  mapM_ print irreducibleIntegrals
 
   when (backsub c) $ do
     putStrLn "Doing backward substitution."
