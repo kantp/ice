@@ -12,45 +12,33 @@ name:                ice
 --                   | | | +--- code changes with no API change
 version:             0.1.0.0
 
--- A short (one-line) description of the package.
 synopsis:            Choose a maximal linearly independent set of integration-by-parts type of equations.
 
 -- A longer description of the package.
--- description:         
+description:         This program implements the algorithm described in the paper
+                     "Finding Linear Dependencies in Integration-By-Parts Equations: 
+                     A Monte Carlo Approach"
 
--- The license under which the package is released.
--- license:             
+license:             GPL-3
 
--- The file containing the license text.
 license-file:        LICENSE
 
--- The package author(s).
 author:              Philipp Kant
 
--- An email address to which users can send suggestions, bug reports, and 
--- patches.
 maintainer:          philipp.kant@physik.hu-berlin.de
 
--- A copyright notice.
--- copyright:           
+copyright:           Copyright 2013 Philipp Kant
 
 category:            Math
 
 build-type:          Simple
 
--- Constraint on the version of Cabal needed to build this package.
 cabal-version:       >=1.8
 
-
-executable ice-dev
-  -- .hs or .lhs file containing the Main module.
+executable ice
   main-is:             ice.hs
-  ghc-options: -Odph -rtsopts -fllvm -optlo-O3
+  ghc-options: -rtsopts -O2 -fllvm -funbox-strict-fields
   
-  -- Modules included in this executable, other than Main.
-  -- other-modules:       
-  
-  -- Other library packages from which modules are imported.
   build-depends:       base ==4.6.*
                      , attoparsec
                      , vector
