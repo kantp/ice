@@ -1,0 +1,146 @@
+#+TITLE:     ICE --- the IBP Chooser of Equations
+#+AUTHOR:    Philipp Kant \\Humboldt-Universität zu Berlin, Institut für Physik, \\Newtonstraße 15, 12489 Berlin
+#+EMAIL:     philipp.kant@physik.hu-berlin.de
+# +DATE:      2013-09-24 Tue
+#+DESCRIPTION:
+#+KEYWORDS:
+#+LANGUAGE:  en
+#+OPTIONS:   H:3 num:t toc:t \n:nil @:t ::t |:t ^:t -:t f:t *:t <:t
+#+OPTIONS:   TeX:t LaTeX:t skip:nil d:nil todo:t pri:nil tags:not-in-toc
+#+INFOJS_OPT: view:nil toc:nil ltoc:t mouse:underline buttons:0 path:http://orgmode.org/org-info.js
+#+EXPORT_SELECT_TAGS: export
+#+EXPORT_EXCLUDE_TAGS: noexport
+#+LINK_UP:   
+#+LINK_HOME: 
+#+XSLT:
+#+LATEX_CLASS:scrartcl
+#+LATEX_HEADER: \usepackage{amsmath}
+#+LATEX_HEADER: \usepackage{libertine}
+#+LaTeX_HEADER: \usepackage[style=numeric-comp,sorting=none]{biblatex}
+#+LaTeX_HEADER: \bibliography{ice-manual}
+
+#+BEGIN_abstract
+This is the manual of ICE, a program to choose a maximal linearly
+independent subset from a given set of Integration-by-Parts and/or
+Lorentz Invariance equations.  The algorithm it implements is
+described in \cite{solve}, and the author considers it good practice
+to cite this paper when the program is used in a calculation leading
+to a scientific publication.
+#+END_abstract
+
+* Purpose of the Program
+...
+* Installation
+The easiest way to compile the program from source is to use the cabal
+build system.  It is included in the Haskell Platform, which is
+available on most modern systems, including GNU/Linux, Windows, and
+OS/X.  If you have the Haskell Platform installed, the following
+commands, executed from the sourcedirectory, will install all needed
+libraries and compile the program
+#+BEGIN_SRC shell
+cabal install --only-dependencies
+cabal configure
+cabal build
+#+END_SRC
+This will create the executable file ./dist/build/ice/ice.
+Alternatively, there are binary executables for some systems available
+from
+
+http://www.physik.hu-berlin.de/pep/tools.
+* Syntax of Input Files
+* Command Line Arguments
+- =-d --dumpfile=FILE= :: In addition to the output on stdout, print
+     a list of newline-separated equation numbers to =FILE=.  Note
+     that the equations are zero-indexed.
+- =--intname=NAME= :: This is used to control the name of the
+     function representing integrals in the input file.  The default
+     is =Int=.
+- =-i --invariants=x= :: Add the symbol =x= to the list of variables
+     that appear in the polynomials.
+- =-b --backsub= :: After forward substitution, perform backward
+     substitution in order to determine which master
+     integrals appear in the result for each integral.
+- =-r --rmax=n= :: 
+- =-s --smax=n= ::
+* Example: One-Loop Massive Self-Energy
+
+#+CAPTION: One-Loop massive self-energy
+#+ATTR_LaTeX: width=0.25\textwidth
+#+LABEL: fig:se1l
+[[./se1l.eps]] 
+In order to illustrate the usage of the program, we give a
+simple example input file for the reduction of the diagram shown
+in\nbsp\ref{fig:se1l}.  The input file with the equations is found in
+=example/se1l.in=.  It contains equations to reduce one scalar product
+and one dot, with invariants =d= and =m=.  The command line to run ICE
+on this file is
+#+BEGIN_SRC shell
+./dist/build/ice/ice -id -im example/se1l.in
+#+END_SRC
+or
+#+BEGIN_SRC shell
+./dist/build/ice/ice -id -im -r1 -s1 --backsub example/se1l.in
+#+END_SRC
+In the latter case, ICE also determines which master integrals are
+needed to express each integral with at most one dot and/or one
+scalar product.
+The output will look similar to
+#+BEGIN_SRC shell
+ICE -- Integration-By-Parts Chooser of Equations
+Command line arguments: Config {inputFile = "example/se1l.in"
+, dumpFile = "", intName = "Int", intNumbers = False
+, invariants = ["d","m"], rMax = 1, sMax = 1, backsub = True}
+Number of equations: 8
+Number of integrals: 8
+Number of integrals within r=1, s=1: 4
+Probing for p = 3036999487
+Random points: [54498325,66450230]
+Number of linearly independent equations: 7
+Indices of linearly independent equations (starting at 0):
+5
+4
+1
+6
+0
+3
+2
+Integrals that can be reduced with these equations:
+(I(2,-1),4)
+(I(1,-1),5)
+(I(2,0),6)
+Possible Master Integrals:
+(I(1,0),7)
+Doing backward substitution.
+Final representations of the integrals will look like:
+I(2,-1) -> {I(1,0)}
+I(1,-1) -> {I(1,0)}
+I(2,0) -> {I(1,0)}
+The probability that this information is wrong is less than 9.219626284640015e-9
+Timings:
+Parsing and preparing equations: 0.00052s
+Solving Equations: 0.000384s
+#+END_SRC
+First, ICE reports the values of the command line arguments given.
+Next, the number of equations and integrals, as well as the number of
+integrals that lie within the region given by the values of =rmax=
+and =smax= is listed.  
+
+After that, the actual algorithm starts.  The prime number and
+evaluation point is given, followed by the number of linearly
+independent equations and their positions in the input file (starting
+with zero).  This is the main information of interest for a
+subsequent run of Laporta's Algorithm.  With the option =--dumpfile=,
+it is possible to write this list to a separate file.
+
+Finally, we get information on which integrals were reduced and which
+are considered master integrals.  In case the =--backsub= option is
+given, ICE also gives a lists of which master integrals appear in the
+expression for each integral that could be reduced.
+# ** Two-Loop Massive Self-Energy
+# #+CAPTION: Two-Loop massive self-energy
+# #+ATTR_LaTeX: width=0.25\textwidth
+# #+LABEL: fig:se2l
+# [[./se2l.eps]]
+
+# The next example is a two-loop self-energy as shown
+# in\nbsp\ref{fig:se2l}.  
