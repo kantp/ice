@@ -254,7 +254,7 @@ main = do
     mapM_ (printRow integralNumbers) rs''
   putStr "The probability that too many equations were discarded is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
-  putStrLn "Timings:"
+  putStrLn "Timings (wall time):"
   putStr "Parsing and preparing equations: "
   print $ diffUTCTime startReductionTime startParseTime
   putStr "Solving Equations: "

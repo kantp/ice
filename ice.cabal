@@ -39,7 +39,7 @@ executable ice
   main-is:             ice.hs
   ghc-options: -rtsopts -O2 -fllvm -funbox-strict-fields
   
-  build-depends:       base ==4.6.*
+  build-depends:       base ==4.*
                      , attoparsec
                      , vector
                      , bytestring
