@@ -24,9 +24,9 @@
 This is the manual of ICE, a program to choose a maximal linearly
 independent subset from a given set of Integration-by-Parts and/or
 Lorentz Invariance equations.  The algorithm it implements is
-described in\nbsp\cite{ice}.  The author considers it good practice
-to cite that paper when the program is used in a calculation leading
-to a scientific publication.
+described in\nbsp\cite{ice}, which is also the reference that should
+be cited when ICE is used in a calculation leading to a scientific
+publication.
 #+END_abstract
 
 * Installation
