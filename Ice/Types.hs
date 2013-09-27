@@ -3,7 +3,6 @@ module Ice.Types
 
 where
 
-import           Control.DeepSeq
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Int (Int8)
@@ -19,6 +18,7 @@ data Config = Config { inputFile :: FilePath
                      , dumpFile :: FilePath
                      , intName :: String
                      , invariants :: [String]
+                     , sortList :: Bool
                      , backsub :: Bool
                      , rMax :: Int8
                      , sMax :: Int8

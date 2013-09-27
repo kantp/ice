@@ -18,23 +18,25 @@
 #+LATEX_HEADER: \usepackage{libertine}
 #+LaTeX_HEADER: \usepackage[style=numeric-comp,sorting=none]{biblatex}
 #+LaTeX_HEADER: \bibliography{ice-manual}
+#+LATEX_HEADER: \newcommand{\Fp}{\ensuremath{\mathbb{F}_p}}
 
 #+BEGIN_abstract
 This is the manual of ICE, a program to choose a maximal linearly
 independent subset from a given set of Integration-by-Parts and/or
 Lorentz Invariance equations.  The algorithm it implements is
-described in\nbsp\cite{solve}, and the author considers it good practice
+described in\nbsp\cite{ice}.  The author considers it good practice
 to cite that paper when the program is used in a calculation leading
 to a scientific publication.
 #+END_abstract
 
 * Installation
 The easiest way to compile the program from source is to use the cabal
-build system.  It is included in the Haskell Platform[fn:http://www.haskell.org/platform/], which is
-available on most modern systems, including GNU/Linux, Windows, and
-OS/X.  If you have the Haskell Platform installed, the following
-commands, executed from the sourcedirectory, will install all needed
-libraries and compile the program
+build system.  It is included in the Haskell
+Platform[fn:http://www.haskell.org/platform/], which is available on
+most modern systems, including GNU/Linux, Windows, and OS/X.  If you
+have the Haskell Platform installed, the following commands, executed
+from the source directory, will install all needed libraries and
+compile the program
 #+BEGIN_SRC shell
 cabal install --only-dependencies
 cabal configure
@@ -59,8 +61,11 @@ where the following options are available:
      is =Int=.
 - =-i --invariants=x= :: Add the symbol =x= to the list of variables
      that appear in the polynomials.
-- =-b --backsub= :: After forward substitution, perform backward
-     substitution in order to determine which master
+- =--sortList= :: Sort the list of linearly independent equations.
+     Otherwise, prints a permutation that brings the matrix as close
+     to upper triangular form as possible. 
+- =-b --backsub= :: After forward elimination, perform backward
+     elimination in order to determine which master
      integrals appear in the result for each integral.
 - =-r --rmax=n=, =-s --smax=n= :: Only relevant if =--backsub= is
      given.  Do not try to find a representation for integrals with
@@ -70,12 +75,23 @@ where the following options are available:
      used as seeds in the generation of the system) that can not be
      determined by the system, but are not master integrals and could
      be reduced if the system was enlarged.  Discarding those before
-     the backward substitution saves some time.
+     the backward elimination saves some time.
+- =-? --help= :: Display help message
+- =-V --version= :: Print version information
 The input file =FILE= should have the following syntax:
 - Each line gives one term in an equation in the form 
   \\
-  =Int[<indices>]*(<sum of coefficients>)=
+  =Int[<indices>]*(<sum of terms>)=
   \\ The brackets are mandatory.
+- Each term consits of
+  - a sign, =+= or =-=.  If the first term is positive, its sign can
+    be omitted.
+  - a (positive) integer coefficient.  If the coefficient is one, this can be omitted.
+  - a multiplication operator =*= (unless the integer coefficient is
+    omitted), followed by one of the strings defined as an invariant
+    using the =-i= option, possibly followed by =^= and a positive
+    exponent.  This can be repeated, separated by the multiplication
+    operator =*=.
 - Equations are terminated and separated by a line consisting of only
   a semicolon.
 For an example, see the following section.
@@ -110,33 +126,33 @@ Command line arguments: Config {inputFile = "example/se1l.in"
 Number of equations: 8
 Number of integrals: 8
 Number of integrals within r=1, s=1: 4
-Probing for p = 3036998761
-Random points: [2887887967,690347565]
+Probing for p = 3036999841
+Random points: [2181539769,2267241561]
 Number of linearly independent equations: 7
 Indices of linearly independent equations (starting at 0):
 5
 4
-1
 6
+1
 0
-3
 2
+3
 Integrals that can be reduced with these equations:
 Int[2,-1]
-Int[1,-1]
 Int[2,0]
+Int[1,-1]
 Possible Master Integrals:
 Int[1,0]
-Doing backward substitution.
+Performing backward elimination.
 Final representations of the integrals will look like:
 Int[2,-1] -> {Int[1,0]}
-Int[1,-1] -> {Int[1,0]}
 Int[2,0] -> {Int[1,0]}
-The probability that too many equations were discarded
- is less than 9.219628172019156e-9
+Int[1,-1] -> {Int[1,0]}
+The probability that too many equations were discarded 
+  is less than 9.219625063394687e-9
 Timings:
-Parsing and preparing equations: 0.000514s
-Solving Equations: 0.000517s
+Parsing and preparing equations: 0.000284s
+Solving Equations: 0.000263s
 #+END_SRC
 First, ICE reports the values of the command line arguments given.
 Next, the number of equations and integrals, as well as the number of
@@ -155,6 +171,58 @@ are considered master integrals.  In case the =--backsub= option is
 given, ICE also gives a lists of which master integrals appear in the
 expression for each integral that could be reduced.
 
+* Details on the Implementation
+Internally, a run of ICE consists of the following steps:
+- Parsing of the input file
+- Ordering of the integrals and bringing the system to matrix form
+- Processing the matrix with the algorithm of\nbsp\cite{ice}
+- Optionally, performing backward elimination in order to determine
+  which master integrals are needed to express each integral
+In the following, we give some remarks about each step.
+
+** Parsing of the Input File
+The syntax of the input file has been described above, and an example
+is distributed along with ICE.  As ICE will typically be used on large
+problems in an automated toolchain, the parser has been designed for
+speed, not for helpful error messages.  In particular, unless all
+invariants appearing in the equations are declared via the =-i=
+command line option, the program will crash.
+** Ordering of the Integrals
+In order to express complicated integrals in terms of easier ones, we
+perform an ordering on the integrals, in decreasing order,
+following\nbsp\cite{Laporta:2001dd}.  By inserting the integrals into
+a binary search tree, we assign a number to each integral.  This
+number corresponds to the column number in the matrix.
+
+The ordering determines which integrals are considered master
+integrals by ICE.  Should one wish to change it (for instance, to
+prefer scalar products over dots in the master integrals), the
+definition of the ordering is found in =./Ice/Types.hs= and can easily
+be modified.
+** Main Algorithm
+The prime \(p\) defining the field \Fp, and the evaluation point, is
+chosen randomly.  For efficiency, the program contains a list of 100
+pre-calculated large prime numbers.  Large in this context means that
+they are as large as possible under the constraint that their square
+can be represented as a 64bit integer.
+
+For a detailed description of the main algorithm, see\nbsp\cite{ice}.
+** Optional Backward Elimination
+Sometimes, it can be desirable to know which master integrals appear
+in the expression for a certain integral (for example, one could drop
+certain coefficients known to be zero at an earlier stage of the
+reduction).  This knowledge is easily obtained by performing a
+backward elimination and noting which entries of the resulting matrix
+are non-zero.  Ice performs this step if the command line argument
+=--backsub= is provided.
+
+In a given system of IBP identities, there will be some integrals with
+more dots and/or scalar products than in the integrals used to
+generate the system.  Some of these integrals can not be reduced to
+master integrals without enlarging the system, so ICE will drop
+(after the forward elimination) any equations that still contain
+integrals with more dots (scalar products) than allowed by the option
+=--rmax= (=--smax=).
 #+LATEX:\printbibliography{}
 
 # ** Two-Loop Massive Self-Energy

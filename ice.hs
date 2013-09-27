@@ -155,12 +155,13 @@ withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s I
 
 config :: Config
 config = Config { inputFile = def &= args &= typ "FILE"
-                , dumpFile = def &= name "d" &= typFile &= help "File to dump a list of independent equation numbers to."
-                , intName = "Int" &= help "Name of the function representing an integral."
-                , invariants = def &= name "i" &= help "Symbols representing kinematic invariants."
-                , rMax = def &= help "Maximal number of dots expected to be reduced."
-                , sMax = def &= help "Maximal number of scalar products expected to be reduced."
-                , backsub = False &= help "Perform backward substitution to investigate which master integrals are needed to express certain integrals."}
+                , dumpFile = def &= name "d" &= typFile &= help "In addition to the output on stdout, print a list of newline-separated equation numbers to FILE.  Note that the equations are zero-indexed."
+                , intName = "Int" &= help "This is used to control the name of the function representing integrals in the input file.  The default is Int."
+                , invariants = def &= name "i" &= help "Add the symbol ITEM to the list of variables that appear in the polynomials."
+                , sortList = False &= help "Sort the list of linearly independent equations.  Otherwise, prints a permutation that brings the matrix as close to upper triangular form as possible."
+                , backsub = False &= help "After forward elimination, perform backward elimination in order to determine which master integrals appear in the result for each integral."
+                , rMax = def &= name "r" &= help "Maximal number of dots expected to be reduced."
+                , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
          &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
                     , "a maximal linearly independent subset."]
@@ -228,10 +229,11 @@ main = do
   let (!rs',_,!j,!i) = withMod p $ testMatrixFwd (length integrals) xs ibpRows
   putStr "Number of linearly independent equations: "
   print (V.length i)
+  let eqList = (if sortList c then sort else id) (V.toList i)
   putStrLn "Indices of linearly independent equations (starting at 0):"
-  V.mapM_ print i
+  mapM_ print eqList
   endReductionTime <- getCurrentTime
-  when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) (V.toList i)))
+  when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) eqList))
 
   let (reducibleIntegrals, irreducibleIntegrals) =
         partition (\ (k,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair k integralNumbers)
