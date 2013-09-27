@@ -37,7 +37,7 @@ cabal-version:       >=1.8
 
 executable ice
   main-is:             ice.hs
-  ghc-options: -rtsopts -O2 -fllvm -funbox-strict-fields
+  ghc-options: -rtsopts -O2 -funbox-strict-fields
   
   build-depends:       base ==4.*
                      , attoparsec
