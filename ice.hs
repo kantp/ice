@@ -242,7 +242,7 @@ main = do
   mapM_ (print . fst) irreducibleIntegrals
 
   when (backsub c) $ do
-    putStrLn "Doing backward substitution."
+    putStrLn "Performing backward elimination."
     let rs'' = unwrapBackGauss p $
                backGauss ([],  map (V.map (second normalise))
                                    ((reverse

@@ -29,26 +29,32 @@ newtype SInt = SInt (V.Vector Int8) deriving Eq
 instance Show SInt where
   show (SInt xs) = "Int[" ++ intercalate "," (map show $ V.toList xs) ++ "]"
 
--- | Scalar integrals are ordered as in Laporta's paper, in decreasing order.
+-- | Scalar integrals are ordered as in Laporta's paper
+-- (arXiv:hep-ph/0102033, Algorithm 1, step 9b), in descending order.
 instance Ord SInt where
   compare (SInt x) (SInt y) = laportaOrdering y x where
     laportaOrdering :: V.Vector Int8 -> V.Vector Int8 -> Ordering
     laportaOrdering =
-      comparing (V.length . V.filter (/=0))
-      `mappend` comparing (numDots . SInt)
-      `mappend` comparing (numSPs . SInt)
-      `mappend` comparing (V.length . V.takeWhile (==0))
-      `mappend` comparePropPowers
-      `mappend` compareSpPowers
+      comparing (V.length . V.filter (>0)) -- number of propagators.
+      `mappend` comparing (numDots . SInt) -- total number of dots.
+      `mappend` comparing (numSPs . SInt) -- total number of scalar products.
+      `mappend` compareMissingProps -- comapre which propagators are present/absent.
+      `mappend` comparePropPowers -- compare powers of individual propagators.
+      `mappend` compareSpPowers -- compare powers of individual scalar products.
+    compareMissingProps xs ys = mconcat (zipWith (\ a b -> compare (signum (max a 0)) (signum (max b 0))) (V.toList ys) (V.toList xs))
     comparePropPowers xs ys = mconcat (zipWith (\ a b -> compare (max a 0) (max b 0)) (V.toList xs) (V.toList ys))
     compareSpPowers xs ys = mconcat (zipWith (\ a b -> compare (max (- a) 0) (max (- b) 0)) (V.toList xs) (V.toList ys))
 
+-- | The total number of dots of an integral.
 numDots :: SInt -> Int8
 numDots (SInt xs) = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
 
+-- | The total number of scalar products of an integral.
 numSPs :: SInt -> Int8
 numSPs (SInt xs) = - (V.sum . V.filter (<0) $ xs)
 
+-- | Check whether an integral has more dots and/or scalar products
+-- than allowed.
 isBeyond :: Config -> SInt -> Bool
 isBeyond c (SInt xs) = r > rMax c || s > sMax c
   where
@@ -63,17 +69,3 @@ data IbpLine = IbpLine { ibpIntegral :: !SInt
                        , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
 -- | An IBP equation.
 newtype Ibp = Ibp (BV.Vector IbpLine) deriving Show
-
-instance NFData SInt where
-  rnf (SInt x) = rnf x 
-instance NFData Term where
-  rnf (Term x y) = rnf x `seq` V.map rnf y `seq` ()
-instance NFData IbpLine where
-  rnf (IbpLine x y z) =
-    rnf x
-    `seq` (R.computeS (R.map rnf y) :: R.Array R.U R.DIM1 ())
-    `seq` (R.computeS (R.map rnf z) :: R.Array R.U R.DIM2 ())
-    `seq` ()
-instance NFData Ibp where
-  rnf (Ibp x) = rnf x 
-
