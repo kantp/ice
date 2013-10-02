@@ -16,8 +16,6 @@
 #+LATEX_CLASS:scrartcl
 #+LATEX_HEADER: \usepackage{amsmath}
 #+LATEX_HEADER: \usepackage{libertine}
-#+LaTeX_HEADER: \usepackage[style=numeric-comp,sorting=none]{biblatex}
-#+LaTeX_HEADER: \bibliography{ice-manual}
 #+LATEX_HEADER: \newcommand{\Fp}{\ensuremath{\mathbb{F}_p}}
 
 #+BEGIN_abstract
@@ -223,7 +221,8 @@ master integrals without enlarging the system, so ICE will drop
 (after the forward elimination) any equations that still contain
 integrals with more dots (scalar products) than allowed by the option
 =--rmax= (=--smax=).
-#+LATEX:\printbibliography{}
+\bibliographystyle{hunsrt}
+\bibliography{ice-manual}{}
 
 # ** Two-Loop Massive Self-Energy
 # #+CAPTION: Two-Loop massive self-energy
