@@ -22,6 +22,7 @@ data Config = Config { inputFile :: FilePath
                      , backsub :: Bool
                      , rMax :: Int8
                      , sMax :: Int8
+                     , visualize :: Bool
                      } deriving (Show, Data, Typeable)
 
 -- | A scalar integral is represented by its indices.

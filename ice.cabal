@@ -51,3 +51,4 @@ executable ice
                      , tagged
                      , cmdargs
                      , time
+                     , bmp

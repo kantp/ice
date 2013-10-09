@@ -7,31 +7,33 @@ module Main
        (main)
        where
 
+import           Codec.BMP (BMP, packRGBA32ToBMP, writeBMP)
 import           Control.Arrow
 import           Control.Exception (assert)
 import           Control.Monad
 import           Control.Monad.Random
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map)
+import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Attoparsec
+import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
 import           Data.Function (on)
 import           Data.List
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Monoid
-import           Ice.Fp
-import           Data.Time
-import           System.Console.CmdArgs
 import           Data.Ord
 import           Data.Proxy
 import           Data.Reflection
+import           Data.Time
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
-import           Ice.ParseIbp
-import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Word (Word8)
+import           Ice.Fp
+import           Ice.ParseIbp
 import           Ice.Types
+import           System.Console.CmdArgs
 import           System.IO
 
 -- driver for the parser.
@@ -110,7 +112,7 @@ probeStep (!rsDone, !rs) !d !j !i
     (pivotRow, rowsToModify, ignoreRows) =
       removeMinAndSplitBy
       (comparing (fst . V.head . snd) -- first column with non-zero entry
-       `mappend` flip (comparing (snd . snd . fst)) -- originally most com;plicated integral
+       `mappend` flip (comparing (snd . snd . fst)) -- originally most complicated integral
        `mappend` comparing (fst . snd . fst) -- original number of terms in equation
        `mappend` comparing (fst . fst) -- line number as tie braker
       )
@@ -153,6 +155,19 @@ withMod :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int,
 withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
   where symmetricRep' (rs,d,j,i) = (map (V.map (second unFp)) rs,unFp d,j,i)
 
+sparsityBMP :: Int -> [V.Vector Int] -> BMP
+sparsityBMP width rs = packRGBA32ToBMP width (length rs) rgba
+  where
+    rgba = pack . concatMap (buildRow . V.toList) $ rs
+    black = [0,0,0,255] :: [Word8]
+    white = [255,255,255,255] :: [Word8]
+    buildRow r = concat $ unfoldr step (0,r)
+    step (i,r)
+      | i >= width = Nothing
+      | null r = Just (white, (i+1, r))
+      | head r == i = Just (black, (i+1, tail r))
+      | otherwise = Just (white, (i+1, r))
+
 config :: Config
 config = Config { inputFile = def &= args &= typ "FILE"
                 , dumpFile = def &= name "d" &= typFile &= help "In addition to the output on stdout, print a list of newline-separated equation numbers to FILE.  Note that the equations are zero-indexed."
@@ -161,7 +176,8 @@ config = Config { inputFile = def &= args &= typ "FILE"
                 , sortList = False &= help "Sort the list of linearly independent equations.  Otherwise, prints a permutation that brings the matrix as close to upper triangular form as possible."
                 , backsub = False &= help "After forward elimination, perform backward elimination in order to determine which master integrals appear in the result for each integral."
                 , rMax = def &= name "r" &= help "Maximal number of dots expected to be reduced."
-                , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."}
+                , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."
+                , visualize = False &= help "Draw images of the sparsity pattern of original, reduced, and solved matrices."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
          &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
                     , "a maximal linearly independent subset."]
@@ -233,6 +249,8 @@ main = do
   putStrLn "Indices of linearly independent equations (starting at 0):"
   mapM_ print eqList
   endReductionTime <- getCurrentTime
+  when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP (length integrals) (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
+  when (visualize c) (writeBMP (inputFile c Data.List.++ ".forward.bmp") (sparsityBMP (length integrals) (map (V.map fst) rs')))
   when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) eqList))
 
   let (reducibleIntegrals, irreducibleIntegrals) =
@@ -252,6 +270,8 @@ main = do
                                      . reverse) rs'))
     putStrLn "Final representations of the integrals will look like:"
     mapM_ (printRow integralNumbers) rs''
+    when (visualize c) (writeBMP (inputFile c Data.List.++ ".solved.bmp") (sparsityBMP (length integrals) (reverse rs'')))
+
   putStr "The probability that too many equations were discarded is less than "
   print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStrLn "Timings (wall time):"
