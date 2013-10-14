@@ -49,7 +49,7 @@ indices intName = do
   char ']'
   return $! inds
 
-collectTerms :: Int -> [Term] -> (Array V DIM1 Integer, Array U DIM2 Word8)
+collectTerms :: Int -> [Term] -> MPoly
 collectTerms !nVars !ts =
   let !nTerms = length ts
       !cfs = fromListVector (Z :. nTerms) (map (\ (Term x _) -> x) ts)

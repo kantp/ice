@@ -18,6 +18,7 @@ import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Attoparsec
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
+import           Data.Either (partitionEithers)
 import           Data.Function (on)
 import           Data.List
 import qualified Data.Map as Map
@@ -35,6 +36,31 @@ import           Ice.ParseIbp
 import           Ice.Types
 import           System.Console.CmdArgs
 import           System.IO
+
+-- | A list of pre-generated prime numbers such that the square just fits into a 64bit Integer.
+pList :: [Int]
+pList = [3036998333,3036998347,3036998381,3036998401,3036998429,3036998449,3036998477
+                ,3036998537,3036998561,3036998563,3036998567,3036998599,3036998611,3036998717
+                ,3036998743,3036998759,3036998761,3036998777,3036998803,3036998837,3036998843
+                ,3036998849,3036998857,3036998873,3036998903,3036998933,3036998957,3036998963
+                ,3036998977,3036998989,3036998999,3036999001,3036999019,3036999023,3036999061
+                ,3036999067,3036999079,3036999089,3036999101,3036999113,3036999137,3036999157
+                ,3036999167,3036999209,3036999233,3036999271,3036999283,3036999293,3036999307
+                ,3036999319,3036999341,3036999379,3036999403,3036999431,3036999439,3036999443
+                ,3036999457,3036999467,3036999473,3036999487,3036999499,3036999727,3036999733
+                ,3036999737,3036999739,3036999761,3036999769,3036999773,3036999803,3036999811
+                ,3036999817,3036999821,3036999841,3036999877,3036999887,3036999899,3036999941
+                ,3036999983,3036999991,3037000013,3037000039,3037000069,3037000103,3037000111
+                ,3037000121,3037000159,3037000177,3037000181,3037000193,3037000249,3037000289
+                ,3037000303,3037000331,3037000333,3037000391,3037000399,3037000427,3037000429
+                ,3037000453,3037000493]
+
+-- | Given the supposed rank of the system and the prime number used,
+-- calculate an upper bound on the probability of failure.
+getBound :: Int -> Int -> Double
+getBound r p = (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..r]] :: Double)
+
+
 
 -- driver for the parser.
 refill :: Handle -> IO B.ByteString
@@ -60,7 +86,7 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
-ibpToRow :: (Map.Map SInt Int, Map.Map SInt Int) -> Ibp -> BV.Vector (Int, (Array V DIM1 Integer, Array U DIM2 Word8))
+ibpToRow :: (Map.Map SInt Int, Map.Map SInt Int) -> Ibp -> Equation
 ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
   where
     row = map
@@ -84,6 +110,16 @@ backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (V.map fst pivotRow:rsDone, rs'
       Nothing -> row
       Just (_, elt) -> addRows (multRow (-elt*invPivot) pivotRow) row
       
+-- | split equations into linearly independent and linealy dependent
+-- ones (given the list i of linearly independent equations),
+-- preserving the permutation.
+partitionEqs :: [Int] -> [a] -> ([a], [a])
+partitionEqs is rs = first reverse . (map snd *** map snd) $ foldl' step ([], rs') is
+  where
+    rs' = [(i,rs Data.List.!! i) | i <- [0..length rs - 1]]
+    step (indep, dep) i = (eq:indep, dep')
+      where ([eq], dep') = partition ((==i) . fst) dep
+
 -- | Given an ordering and an equality check, partition a list into a
 -- triplet of
 -- 1. the minimal element w.r.t. the ordering
@@ -130,10 +166,78 @@ probeStep (!rsDone, !rs) !d !j !i
     i' = (fst . fst $ pivotRow) :i
     rsDone' = snd normalisedPivotRow:rsDone
 
+performForwardElim goal nInvs nInts eqs = do
+  p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
+  xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
+  putStr "Probing for p = "
+  print p
+  putStr "Random points: "
+  print (V.toList xs)
+  let (!rs',_,!j,!i) = withMod p $ testMatrixFwd nInts xs eqs
+      r = V.length i
+      bound = getBound r p
+  putStr "The probability that too many equations were discarded is less than "
+  print bound
+  if bound < goal
+    then return (rs', j, i)
+    else let redoTest r bound rs = do
+               putStrLn "Iterating to decrease probability of failure."
+               p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
+               xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
+               let result = unwrapForwardSubTest p $
+                            startFwdSubTest nInts r xs rs
+               case result of
+                 Good bound' -> let bound'' = bound * bound'
+                                in if bound'' < goal then return (rs', j, i)
+                                   else redoTest r bound'' rs
+                 Restart -> performForwardElim goal nInvs nInts eqs
+                 Unlucky -> redoTest r bound splitRows
+             splitRows = partitionEqs (V.toList i) eqs
+
+         in redoTest r bound splitRows
+
+
+unwrapForwardSubTest :: Int
+                        -> (forall s . Reifies s Int => (Fp s Int, TestResult))
+                        -> TestResult
+unwrapForwardSubTest m f =
+  snd $ reify m (\ (_ :: Proxy s) -> first unFp (f :: (Fp s Int, TestResult)))
+
+startFwdSubTest :: forall s . Reifies s Int
+                   => Int -> Int -> V.Vector Int
+                   -> ([Equation], [Equation])
+                   -> (Fp s Int, TestResult)
+startFwdSubTest nInts r xs rs =
+  let xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
+      evaldRs = both (BV.toList . rows . evalIbps nInts xs') rs
+  in forwardSubTest r (snd evaldRs) (fst evaldRs) 1
+forwardSubTest :: forall s . Reifies s Int
+              => Int -> [Row s] -> [Row s] -> Fp s Int -> (Fp s Int, TestResult)
+forwardSubTest r zeroRows rs d
+  | null rs = (d', if null zeroRows then Good (getBound r (getModulus d)) else Unlucky)
+  -- | null zeroRows = (d', Good)
+  | otherwise = if (null failedRs && null failedZeroRows)
+                then forwardSubTest r zeroRows' rs' d'
+                else (d, Restart)
+  where
+    pivotRow : rowsToModify = rs
+    (pivotColumn, pivotElement) = V.head pivotRow
+    normalisedPivotRow = multRow (recip pivotElement) pivotRow
+    d' = d * pivotElement
+    pivotOperation row =
+      let (k,x) = V.head row
+      in case compare k pivotColumn of
+        GT -> Left row
+        EQ -> Left $ addRows (multRow (-x) normalisedPivotRow) row
+        LT -> Right "Non-zero element left of pivot row."
+    mapPivotOp rows = first (filter (not . V.null)) (partitionEithers $ fmap pivotOperation rows)
+    (rs', failedRs) = mapPivotOp rowsToModify
+    (zeroRows', failedZeroRows) = mapPivotOp zeroRows
+
 evalIbps :: forall s . Reifies s Int
             => Int
             -> Array U DIM1 (Fp s Int)
-            -> [BV.Vector (Int, (Array V DIM1 Integer, Array U DIM2 Word8))]
+            -> [Equation]
             -> Matrix s
 evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   rs' = BV.fromList (map treatRow rs)
@@ -143,7 +247,7 @@ evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
 testMatrixFwd :: forall s . Reifies s Int
                  => Int
                  -> V.Vector Int
-                 -> [BV.Vector (Int, (Array V DIM1 Integer, Array U DIM2 Word8))]
+                 -> [Equation]
                  -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
 testMatrixFwd n xs rs = (rs',d,j,i) where
   (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ k v -> ((k,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
@@ -177,7 +281,8 @@ config = Config { inputFile = def &= args &= typ "FILE"
                 , backsub = False &= help "After forward elimination, perform backward elimination in order to determine which master integrals appear in the result for each integral."
                 , rMax = def &= name "r" &= help "Maximal number of dots expected to be reduced."
                 , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."
-                , visualize = False &= help "Draw images of the sparsity pattern of original, reduced, and solved matrices."}
+                , visualize = False &= help "Draw images of the sparsity pattern of original, reduced, and solved matrices."
+                , failBound = 1 &= help "Repeat forward elimination to decrease probability of failure below this."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
          &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
                     , "a maximal linearly independent subset."]
@@ -220,35 +325,18 @@ main = do
   putStrLn (concat ["Number of integrals within r="
                    , show (rMax c), ", s=", show (sMax c)
                    , ": ", show (length innerIntegrals)])
-  let pList = [3036998333,3036998347,3036998381,3036998401,3036998429,3036998449,3036998477
-              ,3036998537,3036998561,3036998563,3036998567,3036998599,3036998611,3036998717
-              ,3036998743,3036998759,3036998761,3036998777,3036998803,3036998837,3036998843
-              ,3036998849,3036998857,3036998873,3036998903,3036998933,3036998957,3036998963
-              ,3036998977,3036998989,3036998999,3036999001,3036999019,3036999023,3036999061
-              ,3036999067,3036999079,3036999089,3036999101,3036999113,3036999137,3036999157
-              ,3036999167,3036999209,3036999233,3036999271,3036999283,3036999293,3036999307
-              ,3036999319,3036999341,3036999379,3036999403,3036999431,3036999439,3036999443
-              ,3036999457,3036999467,3036999473,3036999487,3036999499,3036999727,3036999733
-              ,3036999737,3036999739,3036999761,3036999769,3036999773,3036999803,3036999811
-              ,3036999817,3036999821,3036999841,3036999877,3036999887,3036999899,3036999941
-              ,3036999983,3036999991,3037000013,3037000039,3037000069,3037000103,3037000111
-              ,3037000121,3037000159,3037000177,3037000181,3037000193,3037000249,3037000289
-              ,3037000303,3037000331,3037000333,3037000391,3037000399,3037000427,3037000429
-              ,3037000453,3037000493] :: [Int]
-  p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
-  xs <- V.generateM (length invs) (\_ -> getRandomR (1,p))
-  putStr "Probing for p = "
-  print p
-  putStr "Random points: "
-  print (V.toList xs)
   startReductionTime <- getCurrentTime
-  let (!rs',_,!j,!i) = withMod p $ testMatrixFwd (length integrals) xs ibpRows
+  (rs', j, i) <- performForwardElim (failBound c) (length invs) (length integrals) ibpRows
   putStr "Number of linearly independent equations: "
   print (V.length i)
   let eqList = (if sortList c then sort else id) (V.toList i)
   putStrLn "Indices of linearly independent equations (starting at 0):"
   mapM_ print eqList
   endReductionTime <- getCurrentTime
+  -- when (iterations c > 0) $ do
+  --   let (neededRows, dependentRows) = partitionEqs (V.toList i) ibpRows
+  --   putStr "probing again"
+  --   print (unwrapForwardSubTest p $ forwardSubTest neededRows dependentRows 1)
   when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP (length integrals) (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
   when (visualize c) (writeBMP (inputFile c Data.List.++ ".forward.bmp") (sparsityBMP (length integrals) (map (V.map fst) rs')))
   when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) eqList))
@@ -261,19 +349,17 @@ main = do
   putStrLn "Possible Master Integrals:"
   mapM_ (print . fst) irreducibleIntegrals
 
-  when (backsub c) $ do
-    putStrLn "Performing backward elimination."
-    let rs'' = unwrapBackGauss p $
-               backGauss ([],  map (V.map (second normalise))
-                                   ((reverse
-                                     . dropWhile ((<nOuterIntegrals) . fst . V.head)
-                                     . reverse) rs'))
-    putStrLn "Final representations of the integrals will look like:"
-    mapM_ (printRow integralNumbers) rs''
-    when (visualize c) (writeBMP (inputFile c Data.List.++ ".solved.bmp") (sparsityBMP (length integrals) (reverse rs'')))
+  -- when (backsub c) $ do
+  --   putStrLn "Performing backward elimination."
+  --   let rs'' = unwrapBackGauss p $
+  --              backGauss ([],  map (V.map (second normalise))
+  --                                  ((reverse
+  --                                    . dropWhile ((<nOuterIntegrals) . fst . V.head)
+  --                                    . reverse) rs'))
+  --   putStrLn "Final representations of the integrals will look like:"
+  --   mapM_ (printRow integralNumbers) rs''
+  --   when (visualize c) (writeBMP (inputFile c Data.List.++ ".solved.bmp") (sparsityBMP (length integrals) (reverse rs'')))
 
-  putStr "The probability that too many equations were discarded is less than "
-  print (1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..V.length i]] :: Double)
   putStrLn "Timings (wall time):"
   putStr "Parsing and preparing equations: "
   print $ diffUTCTime startReductionTime startParseTime

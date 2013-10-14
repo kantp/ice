@@ -23,6 +23,7 @@ data Config = Config { inputFile :: FilePath
                      , rMax :: Int8
                      , sMax :: Int8
                      , visualize :: Bool
+                     , failBound :: Double
                      } deriving (Show, Data, Typeable)
 
 -- | A scalar integral is represented by its indices.
@@ -70,3 +71,12 @@ data IbpLine = IbpLine { ibpIntegral :: !SInt
                        , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
 -- | An IBP equation.
 newtype Ibp = Ibp (BV.Vector IbpLine) deriving Show
+
+-- | A multivariate Polynomial.
+type MPoly = (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8)
+type Equation = BV.Vector (Int, MPoly)
+
+-- | Result of successive Monte Carlo runs.
+data TestResult = Unlucky -- ^ We have hit a bad evaluation point and have to discard the result of this run.
+                | Restart -- ^ The previous run had a bad evaluation point, and we have to restart.
+                | Good !Double -- ^ We have not detected a bad point, and the chance that our result is wrong is less than this.
