@@ -16,6 +16,7 @@ import           System.Console.CmdArgs
 -- | Configuration via cmdargs library.
 data Config = Config { inputFile :: FilePath
                      , dumpFile :: FilePath
+                     , logFile :: FilePath
                      , intName :: String
                      , invariants :: [String]
                      , sortList :: Bool
@@ -24,6 +25,7 @@ data Config = Config { inputFile :: FilePath
                      , sMax :: Int8
                      , visualize :: Bool
                      , failBound :: Double
+                     , pipes :: Bool
                      } deriving (Show, Data, Typeable)
 
 -- | A scalar integral is represented by its indices.

@@ -40,20 +40,20 @@ import           System.IO
 -- | A list of pre-generated prime numbers such that the square just fits into a 64bit Integer.
 pList :: [Int]
 pList = [3036998333,3036998347,3036998381,3036998401,3036998429,3036998449,3036998477
-                ,3036998537,3036998561,3036998563,3036998567,3036998599,3036998611,3036998717
-                ,3036998743,3036998759,3036998761,3036998777,3036998803,3036998837,3036998843
-                ,3036998849,3036998857,3036998873,3036998903,3036998933,3036998957,3036998963
-                ,3036998977,3036998989,3036998999,3036999001,3036999019,3036999023,3036999061
-                ,3036999067,3036999079,3036999089,3036999101,3036999113,3036999137,3036999157
-                ,3036999167,3036999209,3036999233,3036999271,3036999283,3036999293,3036999307
-                ,3036999319,3036999341,3036999379,3036999403,3036999431,3036999439,3036999443
-                ,3036999457,3036999467,3036999473,3036999487,3036999499,3036999727,3036999733
-                ,3036999737,3036999739,3036999761,3036999769,3036999773,3036999803,3036999811
-                ,3036999817,3036999821,3036999841,3036999877,3036999887,3036999899,3036999941
-                ,3036999983,3036999991,3037000013,3037000039,3037000069,3037000103,3037000111
-                ,3037000121,3037000159,3037000177,3037000181,3037000193,3037000249,3037000289
-                ,3037000303,3037000331,3037000333,3037000391,3037000399,3037000427,3037000429
-                ,3037000453,3037000493]
+        ,3036998537,3036998561,3036998563,3036998567,3036998599,3036998611,3036998717
+        ,3036998743,3036998759,3036998761,3036998777,3036998803,3036998837,3036998843
+        ,3036998849,3036998857,3036998873,3036998903,3036998933,3036998957,3036998963
+        ,3036998977,3036998989,3036998999,3036999001,3036999019,3036999023,3036999061
+        ,3036999067,3036999079,3036999089,3036999101,3036999113,3036999137,3036999157
+        ,3036999167,3036999209,3036999233,3036999271,3036999283,3036999293,3036999307
+        ,3036999319,3036999341,3036999379,3036999403,3036999431,3036999439,3036999443
+        ,3036999457,3036999467,3036999473,3036999487,3036999499,3036999727,3036999733
+        ,3036999737,3036999739,3036999761,3036999769,3036999773,3036999803,3036999811
+        ,3036999817,3036999821,3036999841,3036999877,3036999887,3036999899,3036999941
+        ,3036999983,3036999991,3037000013,3037000039,3037000069,3037000103,3037000111
+        ,3037000121,3037000159,3037000177,3037000181,3037000193,3037000249,3037000289
+        ,3037000303,3037000331,3037000333,3037000391,3037000399,3037000427,3037000429
+        ,3037000453,3037000493]
 
 -- | Given the supposed rank of the system and the prime number used,
 -- calculate an upper bound on the probability of failure.
@@ -164,37 +164,38 @@ probeStep (!rsDone, !rs) !d !j !i
     i' = (fst . fst $ pivotRow) :i
     rsDone' = snd normalisedPivotRow:rsDone
 
-performForwardElim :: Double -> Int -> Int -> [Equation]
+performForwardElim :: Handle -> Double -> Int -> Int -> [Equation]
                       -> IO ([V.Vector (Int, Int)], V.Vector Int, V.Vector Int, Int)
-performForwardElim goal nInvs nInts eqs = do
+performForwardElim h goal nInvs nInts eqs = do
   p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
   xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
-  putStr "Probing for p = "
-  print p
-  putStr "Random points: "
-  print (V.toList xs)
+  hPutStrLn h ("Probing for p = " Data.List.++ show p)
+  hPutStrLn h ("Random points: " Data.List.++ show (V.toList xs))
   let (!rs',_,!j,!i) = withMod p $ testMatrixFwd nInts xs eqs
       r = V.length i
       bound = getBound r p
-  putStr "The probability that too many equations were discarded is less than "
-  print bound
+  showBound bound
   if bound < goal
     then return (rs', j, i, p)
     else let redoTest r bound rs = do
-               putStrLn "Iterating to decrease probability of failure."
+               hPutStrLn h "Iterating to decrease probability of failure."
                p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
                xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
                let result = unwrapForwardSubTest p $
                             startFwdSubTest nInts r xs rs
                case result of
                  Good bound' -> let bound'' = bound * bound'
-                                in if bound'' < goal then return (rs', j, i, p)
-                                   else redoTest r bound'' rs
-                 Restart -> performForwardElim goal nInvs nInts eqs
-                 Unlucky -> redoTest r bound splitRows
+                                in
+                                 showBound bound'' >>
+                                 if bound'' < goal then return (rs', j, i, p)
+                                 else redoTest r bound'' rs
+                 Restart -> hPutStrLn h "Unlucky evaluation point(s), restarting." >>
+                   performForwardElim h goal nInvs nInts eqs
+                 Unlucky -> hPutStrLn h "Unlucky evaluation point, discarding." >>
+                   redoTest r bound splitRows
              splitRows = partitionEqs (V.toList i) eqs
          in redoTest r bound splitRows
-
+  where showBound b = hPutStrLn h ("The probability that too many equations were discarded is less than " Data.List.++ show b)
 
 unwrapForwardSubTest :: Int
                         -> (forall s . Reifies s Int => (Fp s Int, TestResult))
@@ -274,6 +275,7 @@ sparsityBMP width rs = packRGBA32ToBMP width (length rs) rgba
 config :: Config
 config = Config { inputFile = def &= args &= typ "FILE"
                 , dumpFile = def &= name "d" &= typFile &= help "In addition to the output on stdout, print a list of newline-separated equation numbers to FILE.  Note that the equations are zero-indexed."
+                , logFile = "ice.log" &= name "l" &= help "Path to the logfile."
                 , intName = "Int" &= help "This is used to control the name of the function representing integrals in the input file.  The default is Int."
                 , invariants = def &= name "i" &= help "Add the symbol ITEM to the list of variables that appear in the polynomials."
                 , sortList = False &= help "Sort the list of linearly independent equations.  Otherwise, prints a permutation that brings the matrix as close to upper triangular form as possible."
@@ -281,7 +283,8 @@ config = Config { inputFile = def &= args &= typ "FILE"
                 , rMax = def &= name "r" &= help "Maximal number of dots expected to be reduced."
                 , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."
                 , visualize = False &= help "Draw images of the sparsity pattern of original, reduced, and solved matrices."
-                , failBound = 1 &= help "Repeat forward elimination to decrease probability of failure below this."}
+                , failBound = 1 &= help "Repeat forward elimination to decrease probability of failure below this."
+                , pipes = False &= name "p" &= help "use stdin and stdout for communication instead of files."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
          &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
                     , "a maximal linearly independent subset."]
@@ -301,13 +304,19 @@ main = do
   c <- cmdArgs config
   let eqFile = inputFile c
       invs = invariants c
-  putStrLn "ICE -- Integration-By-Parts Chooser of Equations"
-  putStr "Command line arguments: "
-  print c
+  lFile <- openFile (logFile c) WriteMode
+  let lPutStr = hPutStr lFile
+      lPutStrLn = hPutStrLn lFile
+  lPutStrLn "ICE -- Integration-By-Parts Chooser of Equations"
+  lPutStr "Command line arguments: "
+  lPutStrLn $ show c
   let invariants' = zip [0..] (map B.pack invs)
   startParseTime <- getCurrentTime
-  equations <- liftM reverse $ withFile eqFile ReadMode $
-               incrementy (ibp (B.pack $ intName c) invariants')
+  equations <-
+    if pipes c
+       then incrementy (ibp (B.pack $ intName c) invariants') stdin
+       else liftM reverse $ withFile eqFile ReadMode $
+            incrementy (ibp (B.pack $ intName c) invariants')
   let (outerIntegrals, innerIntegrals) =
         both (map fst . Map.toList . Map.fromList . (`zip` repeat ()))
         (partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations))
@@ -317,20 +326,21 @@ main = do
                         ( zip outerIntegrals [0 :: Int ..]
                         , zip innerIntegrals [nOuterIntegrals ..])
       ibpRows = map (ibpToRow integralNumbers)  equations
-  putStr "Number of equations: "
-  print (length equations)
-  putStr "Number of integrals: "
-  print (length integrals)
-  putStrLn (concat ["Number of integrals within r="
+  lPutStr "Number of equations: "
+  lPutStrLn $ show (length equations)
+  lPutStr "Number of integrals: "
+  lPutStrLn $ show (length integrals)
+  lPutStrLn (concat ["Number of integrals within r="
                    , show (rMax c), ", s=", show (sMax c)
                    , ": ", show (length innerIntegrals)])
   startReductionTime <- getCurrentTime
-  (rs', j, i, p) <- performForwardElim (failBound c) (length invs) (length integrals) ibpRows
-  putStr "Number of linearly independent equations: "
-  print (V.length i)
+  (rs', j, i, p) <- performForwardElim lFile (failBound c) (length invs) (length integrals) ibpRows
+  lPutStr "Number of linearly independent equations: "
+  lPutStrLn $ show (V.length i)
   let eqList = (if sortList c then sort else id) (V.toList i)
-  putStrLn "Indices of linearly independent equations (starting at 0):"
+  lPutStrLn "Indices of linearly independent equations (starting at 0):"
   mapM_ print eqList
+  mapM_ (lPutStrLn . show) eqList
   endReductionTime <- getCurrentTime
   when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP (length integrals) (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
   when (visualize c) (writeBMP (inputFile c Data.List.++ ".forward.bmp") (sparsityBMP (length integrals) (map (V.map fst) rs')))
@@ -339,33 +349,34 @@ main = do
   let (reducibleIntegrals, irreducibleIntegrals) =
         partition (\ (k,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair k integralNumbers)
                           in V.elem n j) (drop nOuterIntegrals $ zip integrals [0 :: Int ..])
-  putStrLn "Integrals that can be reduced with these equations:"
-  mapM_ (print . fst) reducibleIntegrals
-  putStrLn "Possible Master Integrals:"
-  mapM_ (print . fst) irreducibleIntegrals
+  lPutStrLn "Integrals that can be reduced with these equations:"
+  mapM_ (lPutStrLn . show . fst) reducibleIntegrals
+  lPutStrLn "Possible Master Integrals:"
+  mapM_ (lPutStrLn . show . fst) irreducibleIntegrals
 
   when (backsub c) $ do
-    putStrLn "Performing backward elimination."
+    lPutStrLn "Performing backward elimination."
     let rs'' = unwrapBackGauss p $
                backGauss ([],  map (V.map (second normalise))
                                    ((reverse
                                      . dropWhile ((<nOuterIntegrals) . fst . V.head)
                                      . reverse) rs'))
-    putStrLn "Final representations of the integrals will look like:"
-    mapM_ (printRow integralNumbers) rs''
+    lPutStrLn "Final representations of the integrals will look like:"
+    mapM_ (lPutStrLn . printRow integralNumbers)  rs''
     when (visualize c) (writeBMP (inputFile c Data.List.++ ".solved.bmp") (sparsityBMP (length integrals) (reverse rs'')))
 
-  putStrLn "Timings (wall time):"
-  putStr "Parsing and preparing equations: "
-  print $ diffUTCTime startReductionTime startParseTime
-  putStr "Solving Equations: "
-  print $ diffUTCTime endReductionTime startReductionTime
+  lPutStrLn "Timings (wall time):"
+  lPutStr "Parsing and preparing equations: "
+  lPutStrLn $ show $ diffUTCTime startReductionTime startParseTime
+  lPutStr "Solving Equations: "
+  lPutStrLn $ show $ diffUTCTime endReductionTime startReductionTime
+  hClose lFile
 
-    where printRow intmap r = do
-            putStr $ showIntegral intmap (V.head r)
-            putStr " -> {"
-            putStr (intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r)))
-            putStrLn "}"
+    where printRow intmap r =
+            concat [showIntegral intmap (V.head r)
+                   , " -> {"
+                   , intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r))
+                   , "}"]
           showIntegral intmap n =
             let (elt, n') = if n < Map.size (fst intmap)
                             then Map.elemAt n (fst intmap)
