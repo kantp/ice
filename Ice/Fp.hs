@@ -57,14 +57,18 @@ normalise :: forall s a . (Reifies s a, Integral a) => a -> Fp s a
 {-# INLINE normalise #-}
 normalise !a = Fp (a `mod` reflect (undefined :: Proxy s))
 
+takeRem :: forall s a . (Reifies s a, Integral a) => a -> Fp s a
+{-# INLINE takeRem #-}
+takeRem !a = Fp (a `rem` reflect (undefined :: Proxy s))
+
 -- | Determine the modulus used in a calculation.
 getModulus :: forall s a . (Reifies s a) => Fp s a -> a
 getModulus _ = reflect (undefined :: Proxy s)
 
 instance (Reifies s a, Integral a) => Num (Fp s a) where
   {-# SPECIALIZE instance (Reifies s Int) => Num (Fp s Int) #-}
-  Fp a + Fp b = normalise (a + b)
-  Fp a * Fp b = normalise (a * b)
+  Fp a + Fp b = takeRem (a + b)
+  Fp a * Fp b = takeRem (a * b)
   negate (Fp a) = normalise (negate a)
   fromInteger 0 = Fp 0
   fromInteger 1 = Fp 1
