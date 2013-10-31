@@ -36,6 +36,7 @@ have the Haskell Platform installed, the following commands, executed
 from the source directory, will install all needed libraries and
 compile the program
 #+BEGIN_SRC shell
+cabal update
 cabal install --only-dependencies
 cabal configure
 cabal build
@@ -54,6 +55,7 @@ where the following options are available:
 - =-d --dumpfile=FILE= :: In addition to the output on stdout, print
      a list of newline-separated equation numbers to =FILE=.  Note
      that the equations are zero-indexed.
+- =-l --logfile=ITEM= :: Specify where to write the logfile.  Default is =ice.log=.
 - =--intname=NAME= :: This is used to control the name of the
      function representing integrals in the input file.  The default
      is =Int=.
@@ -74,6 +76,12 @@ where the following options are available:
      determined by the system, but are not master integrals and could
      be reduced if the system was enlarged.  Discarding those before
      the backward elimination saves some time.
+- =-v --visualize= :: Draw images of the sparsity pattern of original,
+     reduced, and solved matrices (only works for moderately sized systems).
+- =-f --failbound=NUM= :: Repeat forward elimination to decrease
+     probability of failure below =NUM=.
+- =-p --pipes= :: use stdin and stdout for communication instead of
+     files.
 - =-? --help= :: Display help message
 - =-V --version= :: Print version information
 The input file =FILE= should have the following syntax:
@@ -115,17 +123,21 @@ or
 In the latter case, ICE also determines which master integrals are
 needed to express each integral with at most one dot and/or one
 scalar product.
-The output will look similar to
+This will create the file =ice.log= with contents similar to
 #+BEGIN_SRC shell
 ICE -- Integration-By-Parts Chooser of Equations
 Command line arguments: Config {inputFile = "example/se1l.in"
-, dumpFile = "", intName = "Int", intNumbers = False
-, invariants = ["d","m"], rMax = 1, sMax = 1, backsub = True}
+  , dumpFile = "", logFile = "ice.log", intName = "Int"
+  , invariants = ["d","m"], sortList = False, backsub = True
+  , rMax = 1, sMax = 1, visualize = False, failBound = 1.0
+  , pipes = False}
 Number of equations: 8
 Number of integrals: 8
 Number of integrals within r=1, s=1: 4
-Probing for p = 3036999841
-Random points: [2181539769,2267241561]
+Probing for p = 3036998401
+Random points: [2034626856,325408928]
+The probability that too many equations were discarded 
+  is less than 9.219629504286786e-9
 Number of linearly independent equations: 7
 Indices of linearly independent equations (starting at 0):
 5
@@ -146,11 +158,9 @@ Final representations of the integrals will look like:
 Int[2,-1] -> {Int[1,0]}
 Int[2,0] -> {Int[1,0]}
 Int[1,-1] -> {Int[1,0]}
-The probability that too many equations were discarded 
-  is less than 9.219625063394687e-9
-Timings:
-Parsing and preparing equations: 0.000284s
-Solving Equations: 0.000263s
+Timings (wall time):
+Parsing and preparing equations: 0.000289s
+Solving Equations: 0.000386s
 #+END_SRC
 First, ICE reports the values of the command line arguments given.
 Next, the number of equations and integrals, as well as the number of
@@ -168,6 +178,9 @@ Finally, we get information on which integrals were reduced and which
 are considered master integrals.  In case the =--backsub= option is
 given, ICE also gives a lists of which master integrals appear in the
 expression for each integral that could be reduced.
+
+In addition to creating the logfile, ICE will also print the numbers
+of the linearly independent equations to =stdout=.
 
 * Details on the Implementation
 Internally, a run of ICE consists of the following steps:
@@ -221,7 +234,7 @@ master integrals without enlarging the system, so ICE will drop
 (after the forward elimination) any equations that still contain
 integrals with more dots (scalar products) than allowed by the option
 =--rmax= (=--smax=).
-\bibliographystyle{hunsrt}
+\bibliographystyle{hunsrtslac}
 \bibliography{ice-manual}{}
 
 # ** Two-Loop Massive Self-Energy
