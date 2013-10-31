@@ -38,11 +38,12 @@ term :: [(Int, B.ByteString)] -> Parser Term
 term xs = do
   !cf <- coefficient
   factors <- sepBy' (power xs) (char '*')
-  let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i {- (xs !! i) -} factors)
+  let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i factors)
   return $! Term cf expos
 
 indices :: B.ByteString -> Parser (V.Vector Int8)
 indices intName = do
+  skipSpace
   string intName
   char '['
   !inds <- liftM V.fromList $ sepBy (signed decimal) (char ',')
@@ -59,8 +60,12 @@ collectTerms !nVars !ts =
 ibpLine :: B.ByteString -> [(Int, B.ByteString)] -> Parser IbpLine
 ibpLine intName xs = do
   inds <- indices intName
-  string "*("
-  poly <- manyTill' (term xs) (char ')' >> endOfLine) -- (char '\n')
+  skipSpace
+  char '*'
+  skipSpace
+  char '('
+  skipSpace
+  poly <- manyTill' (term xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
   let poly' = collectTerms (length xs) poly
   return $ uncurry (IbpLine (SInt inds)) poly'
 

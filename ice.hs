@@ -85,12 +85,19 @@ getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
 ibpToRow :: (Map.Map SInt Int, Map.Map SInt Int) -> Ibp -> Equation
-ibpToRow table (Ibp x) = BV.fromList (sortBy (comparing fst) row)
+ibpToRow table (Ibp x) = BV.fromList (doCombine $ sortBy (comparing fst) row)
   where
     row = map
           (\ line ->
             ( fromMaybe (error "integral not found.") (lookupInPair (ibpIntegral line) table)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
+    doCombine [] = []
+    doCombine ((i, x): xs) = combine [] (i, ( R.delay *** R.delay) x) xs
+    combine :: [(Int, (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8))] -> (Int, (R.Array R.D R.DIM1 Integer, R.Array R.D R.DIM2 Word8)) -> [(Int, (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8))] -> [(Int, (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8))]
+    combine acc elt [] = reverse (second (R.computeS *** R.computeS) elt :acc)
+    combine acc (i,elt) ((i',elt'):xs)
+      | i == i' = combine acc (i,(R.append (fst elt) (R.delay $ fst elt'), R.append (snd elt) (R.delay $ snd elt'))) xs
+      | otherwise = combine ( (i, (R.computeS *** R.computeS) elt) :acc) (i',(R.delay *** R.delay) elt') xs
 
 unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector Int])) -> [V.Vector Int]
 unwrapBackGauss p rs = let (_, res) =  reify p (\ (_ :: Proxy s) -> first unFp {-symmetricRep-} (rs :: (Fp s Int, [V.Vector Int])))
