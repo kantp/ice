@@ -342,7 +342,9 @@ main = do
   mapM_ print eqList
   mapM_ (lPutStrLn . show) eqList
   endReductionTime <- getCurrentTime
-  when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP (length integrals) (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
+  when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP (length integrals)
+        (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) [0..length ibpRows - 1])))
+  when (visualize c) (writeBMP (inputFile c Data.List.++ ".select.bmp") (sparsityBMP (length integrals) (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
   when (visualize c) (writeBMP (inputFile c Data.List.++ ".forward.bmp") (sparsityBMP (length integrals) (map (V.map fst) rs')))
   when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) eqList))
 
