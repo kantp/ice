@@ -68,7 +68,7 @@ incrementy :: Parser Ibp -> Handle -> IO [Ibp]
 incrementy xs h = go (0 :: Int) [] =<< refill h
  where
    go n !acc is = do
-     when (n > 0 && n `mod` 10000 == 0) ( putStr "Parsed equations: "
+     when (n > 0 && n `mod` 10000 == 0) ( hPutStr stderr "Parsed equations: "
                                  >> print n)
      r <- parseWith (refill h) xs is
      case r of
