@@ -21,7 +21,8 @@ import qualified Data.ByteString.Char8 as B
 import           Data.Either (partitionEithers)
 import           Data.Function (on)
 import           Data.List
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
+import qualified Data.IntMap.Strict as IMap
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Ord
@@ -125,50 +126,31 @@ partitionEqs is rs = first reverse . (map snd *** map snd) $ foldl' step ([], rs
     step (indep, dep) i = (eq:indep, dep')
       where ([eq], dep') = partition ((==i) . fst) dep
 
--- | Given an ordering and an equality check, partition a list into a
--- triplet of
--- 1. the minimal element w.r.t. the ordering
--- 2. a list of all elements that are equal to 1. with regard to the equality check
--- 3. a list of all other elements.
-removeMinAndSplitBy :: (a -> a -> Ordering) -> (a -> a -> Bool) -> [a] -> (a, [a], [a])
-removeMinAndSplitBy cmp eq xs = foldl' getMin (head xs, [], []) (tail xs)
-  where getMin (!y,!ys, !zs) x = case cmp y x of
-          GT -> if eq x y then (x, y:ys, zs) else (x, [], y: (ys Data.List.++ zs))
-          _  -> if eq x y then (y, x:ys, zs) else (y, ys, x:zs)
-
 probeStep :: forall s . Reifies s Int
-             => ([Row s], [((Int, (Int, Int)), Row s)])
-             -- ^ ([finished rows], [( Line number
-             --                      , ( original number of terms in equation
-             --                      , original index of most complicated integral), equation)])
+             => ([Row s], RowTree s)
              -> Fp s Int
              -> [Int]
              -> [Int]
              -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
 probeStep (!rsDone, !rs) !d !j !i
-  | null rs = (rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+  | Map.null rs = (rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
   | otherwise =
     probeStep (rsDone', rows') d' j' i'
   where
-    (pivotRow, rowsToModify, ignoreRows) =
-      removeMinAndSplitBy
-      (comparing (fst . V.head . snd) -- first column with non-zero entry
-       `mappend` flip (comparing (snd . snd . fst)) -- originally most complicated integral
-       `mappend` comparing (fst . snd . fst) -- original number of terms in equation
-       `mappend` comparing (fst . fst) -- line number as tie braker
-      )
-      ((==) `on` (fst. V.head . snd))
-      rs
+    (pivotRow, otherRows) = Map.deleteFindMin rs
+    (_,_,_,pivotRowNumber) = fst pivotRow
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
+    (rowsToModify, ignoreRows) = Map.split (pivotColumn+1, 0, 0, 0) otherRows
     invPivotElement = recip pivotElement
     normalisedPivotRow = second (multRow invPivotElement) pivotRow
     d' = d * pivotElement
     j' = pivotColumn:j
-    pivotOperation (ind, row) =
+    pivotOperation row =
       let (_,x) = V.head row
-      in (ind, addRows (multRow (-x) (snd normalisedPivotRow)) row)
-    rows' = filter (not . V.null . snd) (fmap pivotOperation rowsToModify) Data.List.++ ignoreRows
-    i' = (fst . fst $ pivotRow) :i
+      in addRows (multRow (-x) (snd normalisedPivotRow)) row
+    modifiedRows = updateRowTree pivotOperation rowsToModify
+    rows' = modifiedRows `Map.union` ignoreRows
+    i' = pivotRowNumber:i
     rsDone' = snd normalisedPivotRow:rsDone
 
 performForwardElim :: Handle -> Double -> Int -> Int -> [Equation]
@@ -251,13 +233,32 @@ evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   treatRow r = V.filter ((/=0) . snd) $ V.convert $ BV.map (second evalPoly) r
   evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
 
+-- type RowTree s = IMap.IntMap (Map.Map (Int, Int) (Row s))
+-- toRowTree rs = IMap.fromListWith Map.insert (map (\ (x, y, z) -> (V.length z, x, y, z)) rs)
+-- | Equations are ordered with the following priority:
+--
+-- - column index of first non-zero entry
+-- - number of times this equations has been modified
+-- - number of terms originally in the equation
+-- - original row number
+type RowTree s = Map.Map (Int, Int, Int, Int) (Row s)
+buildRowTree :: BV.Vector (Row s) -> RowTree s
+buildRowTree rs = Map.fromList $ BV.toList (BV.imap (\ i r -> ((fst (V.head r), 0, V.length r, i), r)) rs)
+updateRowTree :: (Row s -> Row s) -> RowTree s -> RowTree s
+updateRowTree f rs =
+  Map.fromList . Map.elems . Map.filter (not . V.null . snd)  $
+  Map.mapWithKey (\ (_, n, t, i) r -> let r' = f r in ((fst (V.head r'), n+1, t, i), r')) rs
+-- toRowTree :: [(Int, Int, Row s)] -> RowTree s
+-- toRowTree rs = Map.fromList (map (\ (x, y, z) -> ((V.length z, x, y), z) ) rs)
+
 testMatrixFwd :: forall s . Reifies s Int
                  => Int
                  -> V.Vector Int
                  -> [Equation]
                  -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
 testMatrixFwd n xs rs = (rs',d,j,i) where
-  (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ k v -> ((k,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
+  -- (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ k v -> ((k,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
+  (rs', d, j, i) = probeStep ([],  buildRowTree (rows m)) 1 [] []
   m = evalIbps n xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
