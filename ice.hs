@@ -18,13 +18,9 @@ import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Attoparsec
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
-import           Data.Either (partitionEithers)
-import           Data.Function (on)
 import           Data.List
 import qualified Data.Map.Strict as Map
-import qualified Data.IntMap.Strict as IMap
 import           Data.Maybe
-import           Data.Monoid
 import           Data.Ord
 import           Data.Proxy
 import           Data.Reflection
@@ -159,7 +155,7 @@ performForwardElim h goal nInvs nInts eqs = do
   p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
   xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
   hPutStrLn h ("Probing for p = " Data.List.++ show p)
-  hPutStrLn h ("Random points: " Data.List.++ show (V.toList xs))
+  hPutStrLn h ("Random points: " Data.List.++ show (V.toList xs)) >> hFlush h
   let (!rs',_,!j,!i) = withMod p $ testMatrixFwd nInts xs eqs
       r = V.length i
       bound = getBound r p
@@ -170,8 +166,14 @@ performForwardElim h goal nInvs nInts eqs = do
                hPutStrLn h "Iterating to decrease probability of failure."
                p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
                xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
-               let result = unwrapForwardSubTest p $
-                            startFwdSubTest nInts r xs rs
+               hPutStrLn h ("Probing for p = " Data.List.++ show p)
+               hPutStrLn h ("Random points: " Data.List.++ show (V.toList xs)) >> hFlush h
+               let (_,_,_,i') = withMod p $ testMatrixFwd nInts xs eqs
+                   r' = V.length i'
+                   result = case compare (r,i) (r',i') of
+                     EQ -> Good (getBound r p)
+                     LT -> Restart
+                     GT -> Unlucky
                case result of
                  Good bound' -> let bound'' = bound * bound'
                                 in
@@ -185,43 +187,6 @@ performForwardElim h goal nInvs nInts eqs = do
              splitRows = partitionEqs (V.toList i) eqs
          in redoTest r bound splitRows
   where showBound b = hPutStrLn h ("The probability that too many equations were discarded is less than " Data.List.++ show b)
-
-unwrapForwardSubTest :: Int
-                        -> (forall s . Reifies s Int => (Fp s Int, TestResult))
-                        -> TestResult
-unwrapForwardSubTest m f =
-  snd $ reify m (\ (_ :: Proxy s) -> first unFp (f :: (Fp s Int, TestResult)))
-
-startFwdSubTest :: forall s . Reifies s Int
-                   => Int -> Int -> V.Vector Int
-                   -> ([Equation], [Equation])
-                   -> (Fp s Int, TestResult)
-startFwdSubTest nInts r xs rs =
-  let xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
-      evaldRs = both (BV.toList . rows . evalIbps nInts xs') rs
-  in forwardSubTest r (snd evaldRs) (fst evaldRs) 1
-forwardSubTest :: forall s . Reifies s Int
-              => Int -> [Row s] -> [Row s] -> Fp s Int -> (Fp s Int, TestResult)
-forwardSubTest r zeroRows rs d
-  | null rs = (d', if null zeroRows then Good (getBound r (getModulus d)) else Unlucky)
-  -- | null zeroRows = (d', Good)
-  | otherwise = if null failedRs && null failedZeroRows
-                then forwardSubTest r zeroRows' rs' d'
-                else (d, Restart)
-  where
-    pivotRow : rowsToModify = rs
-    (pivotColumn, pivotElement) = V.head pivotRow
-    normalisedPivotRow = multRow (recip pivotElement) pivotRow
-    d' = d * pivotElement
-    pivotOperation row =
-      let (k,x) = V.head row
-      in case compare k pivotColumn of
-        GT -> Left row
-        EQ -> Left $ addRows (multRow (-x) normalisedPivotRow) row
-        LT -> Right "Non-zero element left of pivot row."
-    mapPivotOp rows = first (filter (not . V.null)) (partitionEithers $ fmap pivotOperation rows)
-    (rs', failedRs) = mapPivotOp rowsToModify
-    (zeroRows', failedZeroRows) = mapPivotOp zeroRows
 
 evalIbps :: forall s . Reifies s Int
             => Int
@@ -392,4 +357,3 @@ main = do
                             then Map.elemAt n (fst intmap)
                             else Map.elemAt (n-Map.size (fst intmap)) (snd intmap)
             in assert (n==n') $ show elt
-  
