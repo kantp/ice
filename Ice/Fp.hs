@@ -13,7 +13,7 @@ module Ice.Fp
   , getModulus
   , normalise
   , Row, Matrix (..), multRow, addRows
-  , Poly (..), multiEval
+  , Poly (..), multiEval, multiEvalBulk
   )  where
 
 import           Control.Arrow (second)
@@ -115,7 +115,8 @@ addRows !r1 !r2 = V.unfoldr step (r1, r2) where
           val -> Just ((xi, val), (V.tail x, V.tail y))
 
 data Poly s = Poly { cfs :: !(Array U DIM1 (Fp s Int))
-                   , exps :: !(Array U DIM2 Word8) } deriving (Eq, Show)
+                   , exps :: !(Array U DIM2 Word8) -- ^ exps[(term :. variable)]=exponent
+                   } deriving (Eq, Show)
 
 -- | Evaluation of a multivariate polynomial.
 multiEval :: forall s . Reifies s Int
@@ -129,6 +130,29 @@ multiEval !xs !p =
       monomials = R.foldS (*) 1 powers
       terms = R.zipWith (*) (cfs p) monomials
   in foldAllS (+) 0 terms
+
+-- | Evaluate many polynomials simultaneously, calculating the powers only once.
+multiEvalBulk :: forall s . Reifies s Int
+  => Array U DIM1 (Fp s Int)
+  -> BV.Vector (Poly s)
+  -> V.Vector (Fp s Int)
+multiEvalBulk !xs !ps = V.convert (BV.map evalPoly ps)
+  where
+    evalPoly :: Poly s -> Fp s Int
+    evalPoly p = let monomials = R.foldS (*) 1 (evalTerms (delay $ exps p))
+                     terms = R.zipWith (*) (cfs p) monomials
+                 in foldAllS (+) 0 terms
+    evalTerms :: Array R.D DIM2 Word8 -> Array R.D DIM2 (Fp s Int)
+    evalTerms ts = R.traverse ts id (\ getElt ix@(Z:._:.i :: DIM2) -> (powers BV.! i) V.! fromIntegral (getElt ix))
+    powers = BV.zipWith generatePowers
+             (BV.convert (R.toUnboxed (maxPowers (concatTerms (BV.map (R.delay . exps) ps)))))
+             (BV.convert (R.toUnboxed xs))
+    maxPowers :: Array R.D DIM2 Word8 -> Array U DIM1 Word8
+    maxPowers = R.foldS max 0 . R.transpose
+    concatTerms :: BV.Vector (Array R.D DIM2 Word8) -> Array R.D DIM2 Word8
+    concatTerms =  R.transpose . BV.foldl1' R.append . BV.map R.transpose -- (R.append . R.transpose)
+    generatePowers :: Word8 -> Fp s Int -> V.Vector (Fp s Int)
+    generatePowers n x = V.iterateN (fromIntegral n+1) (*x) 1
 
 -- | Extended Euklid's Algorithm
 eea :: (Integral a) => a -> a -> (a,a,a)

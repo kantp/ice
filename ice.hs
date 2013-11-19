@@ -195,11 +195,11 @@ evalIbps :: forall s . Reifies s Int
             -> Matrix s
 evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   rs' = BV.fromList (map treatRow rs)
-  treatRow r = V.filter ((/=0) . snd) $ V.convert $ BV.map (second evalPoly) r
-  evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
+  -- treatRow r = V.filter ((/=0) . snd) $ V.convert $ BV.map (second evalPoly) r
+  -- evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
+  toPoly (cs, es) = Poly (R.computeS $ R.map fromInteger cs) es
+  treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
 
--- type RowTree s = IMap.IntMap (Map.Map (Int, Int) (Row s))
--- toRowTree rs = IMap.fromListWith Map.insert (map (\ (x, y, z) -> (V.length z, x, y, z)) rs)
 -- | Equations are ordered with the following priority:
 --
 -- - column index of first non-zero entry
