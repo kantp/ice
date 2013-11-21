@@ -285,10 +285,10 @@ main = do
   lPutStrLn $ show c
   let invariants' = zip [0..] (map B.pack invs)
   startParseTime <- getCurrentTime
-  equations <-
+  equations <- liftM reverse $
     if pipes c
        then incrementy (ibp (B.pack $ intName c) invariants') stdin
-       else liftM reverse $ withFile eqFile ReadMode $
+       else withFile eqFile ReadMode $
             incrementy (ibp (B.pack $ intName c) invariants')
   let (outerIntegrals, innerIntegrals) =
         both (map fst . Map.toList . Map.fromList . (`zip` repeat ()))
