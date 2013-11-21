@@ -19,7 +19,6 @@ import           Ice.Types
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map)
 import           Data.Array.Repa.Repr.Vector (V, fromListVector)
-import           Data.Int (Int8)
 import           Data.Word (Word8)
 import           System.IO.Unsafe (unsafePerformIO)
 
@@ -41,7 +40,7 @@ term xs = do
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i factors)
   return $! Term cf expos
 
-indices :: B.ByteString -> Parser (V.Vector Int8)
+indices :: B.ByteString -> Parser (V.Vector Int)
 indices intName = do
   skipSpace
   string intName

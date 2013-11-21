@@ -5,7 +5,6 @@ where
 
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa.Repr.Vector (V)
-import           Data.Int (Int8)
 import           Data.List (intercalate)
 import           Data.Monoid
 import           Data.Ord
@@ -21,15 +20,15 @@ data Config = Config { inputFile :: FilePath
                      , invariants :: [String]
                      , sortList :: Bool
                      , backsub :: Bool
-                     , rMax :: Int8
-                     , sMax :: Int8
+                     , rMax :: Int
+                     , sMax :: Int
                      , visualize :: Bool
                      , failBound :: Double
                      , pipes :: Bool
                      } deriving (Show, Data, Typeable)
 
 -- | A scalar integral is represented by its indices.
-newtype SInt = SInt (V.Vector Int8) deriving Eq
+newtype SInt = SInt (V.Vector Int) deriving Eq
 instance Show SInt where
   show (SInt xs) = "Int[" ++ intercalate "," (map show $ V.toList xs) ++ "]"
 
@@ -37,7 +36,7 @@ instance Show SInt where
 -- (arXiv:hep-ph/0102033, Algorithm 1, step 9b), in descending order.
 instance Ord SInt where
   compare (SInt x) (SInt y) = laportaOrdering y x where
-    laportaOrdering :: V.Vector Int8 -> V.Vector Int8 -> Ordering
+    laportaOrdering :: V.Vector Int -> V.Vector Int -> Ordering
     laportaOrdering =
       comparing (V.length . V.filter (>0)) -- number of propagators.
       `mappend` comparing (numDots . SInt) -- total number of dots.
@@ -50,11 +49,11 @@ instance Ord SInt where
     compareSpPowers xs ys = mconcat (zipWith (\ a b -> compare (max (- a) 0) (max (- b) 0)) (V.toList xs) (V.toList ys))
 
 -- | The total number of dots of an integral.
-numDots :: SInt -> Int8
+numDots :: SInt -> Int
 numDots (SInt xs) = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
 
 -- | The total number of scalar products of an integral.
-numSPs :: SInt -> Int8
+numSPs :: SInt -> Int
 numSPs (SInt xs) = - (V.sum . V.filter (<0) $ xs)
 
 -- | Check whether an integral has more dots and/or scalar products
