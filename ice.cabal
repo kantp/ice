@@ -16,8 +16,8 @@ synopsis:            Choose a maximal linearly independent set of integration-by
 
 -- A longer description of the package.
 description:         This program implements the algorithm described in the paper
-                     "Finding Linear Dependencies in Integration-By-Parts Equations: 
-                     A Monte Carlo Approach"
+                     \"Finding Linear Dependencies in Integration-By-Parts Equations: 
+                     A Monte Carlo Approach\"
 
 license:             GPL-3
 
