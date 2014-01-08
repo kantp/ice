@@ -66,7 +66,7 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
  where
    go n !acc is = do
      when (n > 0 && n `mod` 10000 == 0) ( hPutStr stderr "Parsed equations: "
-                                 >> print n)
+                                 >> (hPutStr stderr . show) n)
      r <- parseWith (refill h) xs is
      case r of
        Fail _ _ msg -> error msg
@@ -355,5 +355,5 @@ main = do
           showIntegral intmap n =
             let (elt, n') = if n < Map.size (fst intmap)
                             then Map.elemAt n (fst intmap)
-                            else Map.elemAt (n-Map.size (fst intmap)) (snd intmap)
+                            else Map.elemAt (n - Map.size (fst intmap)) (snd intmap)
             in assert (n==n') $ show elt
