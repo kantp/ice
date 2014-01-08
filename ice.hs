@@ -81,12 +81,12 @@ incrementy xs h = go (0 :: Int) [] =<< refill h
 getIntegrals :: Ibp -> BV.Vector SInt
 getIntegrals (Ibp x) = BV.map ibpIntegral x
 
-ibpToRow :: (Map.Map SInt Int, Map.Map SInt Int) -> Ibp -> Equation
-ibpToRow table (Ibp x) = BV.fromList (doCombine $ sortBy (comparing fst) row)
+ibpToRow :: Int -> (Map.Map SInt (), Map.Map SInt ()) -> Ibp -> Equation
+ibpToRow offset table (Ibp x) = BV.fromList (doCombine $ sortBy (comparing fst) row)
   where
     row = map
           (\ line ->
-            ( fromMaybe (error "integral not found.") (lookupInPair (ibpIntegral line) table)
+            ( fromMaybe (error "integral not found.") (lookupInPair offset (ibpIntegral line) table)
             , (ibpCfs line, ibpExps line))) (BV.toList x)
     doCombine [] = []
     doCombine ((i, x): xs) = combine [] (i, ( R.delay *** R.delay) x) xs
@@ -95,6 +95,12 @@ ibpToRow table (Ibp x) = BV.fromList (doCombine $ sortBy (comparing fst) row)
     combine acc (i,elt) ((i',elt'):xs)
       | i == i' = combine acc (i,(R.append (fst elt) (R.delay $ fst elt'), R.append (snd elt) (R.delay $ snd elt'))) xs
       | otherwise = combine ( (i, (R.computeS *** R.computeS) elt) :acc) (i',(R.delay *** R.delay) elt') xs
+
+lookupInPair :: Ord k => Int -> k -> (Map.Map k (), Map.Map k ()) -> Maybe Int
+lookupInPair offset k (m1, m2) =
+  case Map.lookupIndex k m1 of
+    Nothing -> liftM (+ offset) (Map.lookupIndex k m2)
+    x -> x
 
 unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector Int])) -> [V.Vector Int]
 unwrapBackGauss p rs = let (_, res) =  reify p (\ (_ :: Proxy s) -> first unFp {-symmetricRep-} (rs :: (Fp s Int, [V.Vector Int])))
@@ -266,12 +272,6 @@ config = Config { inputFile = def &= args &= typ "FILE"
 both :: Arrow a => a b' c' -> a (b', b') (c', c')
 both f = f *** f
 
-lookupInPair :: Ord k => k -> (Map.Map k a, Map.Map k a) -> Maybe a
-lookupInPair k (m1, m2) =
-  case Map.lookup k m1 of
-    Nothing -> Map.lookup k m2
-    x -> x
-
 main :: IO ()
 main = do
   c <- cmdArgs config
@@ -290,24 +290,21 @@ main = do
        then incrementy (ibp (B.pack $ intName c) invariants') stdin
        else withFile eqFile ReadMode $
             incrementy (ibp (B.pack $ intName c) invariants')
-  let (outerIntegrals, innerIntegrals) =
-        both (map fst . Map.toList . Map.fromList . (`zip` repeat ()))
-        (partition (isBeyond c) (concatMap (BV.toList . getIntegrals) equations))
-      nOuterIntegrals = length outerIntegrals
-      integrals = uncurry (Data.List.++) (outerIntegrals, innerIntegrals)
-      integralNumbers = both Map.fromList
-                        ( zip outerIntegrals [0 :: Int ..]
-                        , zip innerIntegrals [nOuterIntegrals ..])
-      ibpRows = map (ibpToRow integralNumbers)  equations
+  let (outerIntegralMap, innerIntegralMap) =
+        Map.partitionWithKey (\ k _ -> isBeyond c k)
+        (Map.fromList $ concatMap (BV.toList . getIntegrals) equations `zip` repeat ())
+      nOuterIntegrals = Map.size outerIntegralMap -- length outerIntegrals
+      nIntegrals = nOuterIntegrals + Map.size innerIntegralMap
+      ibpRows = map (ibpToRow nOuterIntegrals (outerIntegralMap, innerIntegralMap))  equations
   lPutStr "Number of equations: "
   lPutStrLn $ show (length equations)
   lPutStr "Number of integrals: "
-  lPutStrLn $ show (length integrals)
+  lPutStrLn $ show nIntegrals
   lPutStrLn (concat ["Number of integrals within r="
-                   , show (rMax c), ", s=", show (sMax c)
-                   , ": ", show (length innerIntegrals)])
+                    , show (rMax c), ", s=", show (sMax c)
+                    , ": ", show (Map.size innerIntegralMap)])
   startReductionTime <- getCurrentTime
-  (rs', j, i, p) <- performForwardElim lFile (failBound c) (length invs) (length integrals) ibpRows
+  (rs', j, i, p) <- performForwardElim lFile (failBound c) (length invs) nIntegrals ibpRows
   lPutStr "Number of linearly independent equations: "
   lPutStrLn $ show (V.length i)
   let eqList = (if sortList c then sort else id) (V.toList i)
@@ -315,19 +312,19 @@ main = do
   mapM_ print eqList
   mapM_ (lPutStrLn . show) eqList
   endReductionTime <- getCurrentTime
-  when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP (length integrals)
+  when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP nIntegrals
         (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) [0..length ibpRows - 1])))
-  when (visualize c) (writeBMP (inputFile c Data.List.++ ".select.bmp") (sparsityBMP (length integrals) (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
-  when (visualize c) (writeBMP (inputFile c Data.List.++ ".forward.bmp") (sparsityBMP (length integrals) (map (V.map fst) rs')))
+  when (visualize c) (writeBMP (inputFile c Data.List.++ ".select.bmp") (sparsityBMP nIntegrals (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
+  when (visualize c) (writeBMP (inputFile c Data.List.++ ".forward.bmp") (sparsityBMP nIntegrals (map (V.map fst) rs')))
   when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) eqList))
 
   let (reducibleIntegrals, irreducibleIntegrals) =
-        partition (\ (k,_) -> let n = fromMaybe (error  "integral not found.") (lookupInPair k integralNumbers)
-                          in V.elem n j) (drop nOuterIntegrals $ zip integrals [0 :: Int ..])
+        Map.partitionWithKey (\ k _ -> let n = fromMaybe (error  "integral not found.") (lookupInPair nOuterIntegrals k (outerIntegralMap, innerIntegralMap))
+                                     in V.elem n j) innerIntegralMap
   lPutStrLn "Integrals that can be reduced with these equations:"
-  mapM_ (lPutStrLn . show . fst) reducibleIntegrals
+  mapM_ (lPutStrLn . show . fst) (Map.toList reducibleIntegrals)
   lPutStrLn "Possible Master Integrals:"
-  mapM_ (lPutStrLn . show . fst) irreducibleIntegrals
+  mapM_ (lPutStrLn . show . fst) (Map.toList irreducibleIntegrals)
 
   when (backsub c) $ do
     lPutStrLn "Performing backward elimination."
@@ -337,8 +334,8 @@ main = do
                                      . dropWhile ((<nOuterIntegrals) . fst . V.head)
                                      . reverse) rs'))
     lPutStrLn "Final representations of the integrals will look like:"
-    mapM_ (lPutStrLn . printRow integralNumbers)  rs''
-    when (visualize c) (writeBMP (inputFile c Data.List.++ ".solved.bmp") (sparsityBMP (length integrals) (reverse rs'')))
+    mapM_ (lPutStrLn . printRow (outerIntegralMap, innerIntegralMap))  rs''
+    when (visualize c) (writeBMP (inputFile c Data.List.++ ".solved.bmp") (sparsityBMP nIntegrals (reverse rs'')))
 
   lPutStrLn "Timings (wall time):"
   lPutStr "Parsing and preparing equations: "
@@ -353,7 +350,7 @@ main = do
                    , intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r))
                    , "}"]
           showIntegral intmap n =
-            let (elt, n') = if n < Map.size (fst intmap)
-                            then Map.elemAt n (fst intmap)
-                            else Map.elemAt (n - Map.size (fst intmap)) (snd intmap)
-            in assert (n==n') $ show elt
+            let elt = fst $ if n < Map.size (fst intmap)
+                                      then Map.elemAt n (fst intmap)
+                                      else Map.elemAt (n - Map.size (fst intmap)) (snd intmap)
+            in show elt
