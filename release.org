@@ -1,0 +1,50 @@
+#+TITLE: ICE Release Notes
+#+DATE: <2014-01-10 Fri>
+#+AUTHOR: Philipp Kant
+#+EMAIL: kantp@pep23.physik.hu-berlin.de
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline
+#+OPTIONS: author:t c:nil creator:comment d:(not LOGBOOK) date:t e:t
+#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:t toc:t todo:t |:t
+#+CREATOR: Emacs 24.3.1 (Org mode 8.2.1)
+#+DESCRIPTION:
+#+EXCLUDE_TAGS: noexport
+#+KEYWORDS:
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+
+* Version 0.1.0.1
+** New Features
+- New option =-p, --pipes= to use stdin and stdout for communication, instead of
+  files.  Intended for integration with programs implementing
+  Laporta's algorithm.
+- New option =-v, --visualize= to draw simple bitmap images of the
+  sparsity pattern of the system before and after stripping (and
+  backsubstitution if performed).  Note that since the images are not
+  compressed, this option should only be used for moderate system
+  sizes.
+- New option =-f, --failbound= to require an upper bound on the
+  probability of failure, which is reached by repeated runs of the
+  algorithm.
+- It is now possible for the same integral to appear multiple times in
+  a single equation.  The coefficients will be collected by Ice.
+- Using machine size integers instead of 8-bit integers for integral
+  indices, allowing a greater range.  This makes it easier to use a
+  custom ordering on the integrals without changes in the ICE source
+  code:  the integrals just have to be numbered, using a single
+  index, according to the preferred ordering.
+** Optimisations
+- Changed the representation of the matrix during forward substitution
+  to a trie that always has the next pivot row as its first element,
+  and the rows that will be changed in the next pivot step in the
+  first subtree.
+  Searching for the next pivot row, and partitioning the rows is thus
+  replaced by a (usually small) trie merge.  This results in a huge
+  performance boost.
+- Some other minor optimisations (bulk evaluation of polynomials,
+  tweaking of modular arithmetic).
+** Bugfixes with respect to previous release
+None.
+
+* Version 0.1.0.0
+First release.

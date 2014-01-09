@@ -10,7 +10,7 @@ name:                ice
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.1.0.0
+version:             0.1.0.1
 
 synopsis:            Choose a maximal linearly independent set of integration-by-parts type of equations.
 
@@ -43,15 +43,15 @@ executable ice
   ghc-options: -rtsopts -O2 -funbox-strict-fields
   
   build-depends:       base ==4.*
-                     , attoparsec
-                     , vector
-                     , bytestring
-                     , deepseq
-                     , containers
-                     , repa
-                     , reflection
-                     , MonadRandom
-                     , tagged
-                     , cmdargs
-                     , time
-                     , bmp
+                     , attoparsec >= 0.10.0.0
+                     , vector >= 0.10.0.0
+                     , bytestring >= 0.10.0.0
+                     , deepseq >= 1.3.0.0
+                     , containers >= 0.5.0.0
+                     , repa >= 3.2.0.0
+                     , reflection >= 1.3.2
+                     , MonadRandom >= 0.1.11
+                     , tagged >= 0.7
+                     , cmdargs >= 0.10.5
+                     , time >= 1.4.0.0
+                     , bmp >= 1.2.0.0
