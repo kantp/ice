@@ -20,6 +20,7 @@ import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
 import           Data.List
 import qualified Data.Map.Strict as Map
+import qualified Data.IntMap.Strict as IntMap
 import           Data.Maybe
 import           Data.Ord
 import           Data.Proxy
@@ -61,40 +62,47 @@ getBound r p = 1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..r]]
 refill :: Handle -> IO B.ByteString
 refill h = B.hGet h (4*1024)
 
-incrementy :: Parser Ibp -> Handle -> IO [Ibp]
-incrementy xs h = go (0 :: Int) [] =<< refill h
- where
-   go n !acc is = do
-     when (n > 0 && n `mod` 10000 == 0) ( hPutStr stderr "Parsed equations: "
-                                 >> (hPutStr stderr . show) n)
-     r <- parseWith (refill h) xs is
-     case r of
-       Fail _ _ msg -> error msg
-       Done bs x
-           | B.null bs -> do
-              s <- refill h
-              if B.null s
-                then return $! (x:acc)
-                else go (n+1) (x:acc) s
-           | otherwise -> go (n+1) (x:acc) bs
-
-getIntegrals :: Ibp -> BV.Vector SInt
-getIntegrals (Ibp x) = BV.map ibpIntegral x
-
-ibpToRow :: Int -> (Map.Map SInt (), Map.Map SInt ()) -> Ibp -> Equation
-ibpToRow offset table (Ibp x) = BV.fromList (doCombine $ sortBy (comparing fst) row)
+readEquations :: Parser Ibp -> Handle -> IO (Int, Map.Map SInt (IntMap.IntMap MPoly))
+readEquations parser h = go (0::Int) Map.empty =<< refill h
   where
-    row = map
-          (\ line ->
-            ( fromMaybe (error "integral not found.") (lookupInPair offset (ibpIntegral line) table)
-            , (ibpCfs line, ibpExps line))) (BV.toList x)
-    doCombine [] = []
-    doCombine ((i, x): xs) = combine [] (i, ( R.delay *** R.delay) x) xs
-    combine :: [(Int, (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8))] -> (Int, (R.Array R.D R.DIM1 Integer, R.Array R.D R.DIM2 Word8)) -> [(Int, (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8))] -> [(Int, (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8))]
-    combine acc elt [] = reverse (second (R.computeS *** R.computeS) elt :acc)
-    combine acc (i,elt) ((i',elt'):xs)
-      | i == i' = combine acc (i,(R.append (fst elt) (R.delay $ fst elt'), R.append (snd elt) (R.delay $ snd elt'))) xs
-      | otherwise = combine ( (i, (R.computeS *** R.computeS) elt) :acc) (i',(R.delay *** R.delay) elt') xs
+    go !n !acc !is = {- } deepseq acc $ -} do
+      when (n > 0 && n `mod` 10000 == 0) ( hPutStr stderr "Parsed equations: "
+                                           >> (hPutStr stderr . show) n)
+      r <- parseWith (refill h) parser is
+      case r of
+        Fail _ _ msg -> error msg
+        Done bs x
+          | B.null bs -> do
+            s <- refill h
+            -- acc' `deepseq`
+            if B.null s
+                                then return (n + 1, acc')
+                                else go (n + 1) acc' s
+          | otherwise -> go (n + 1) acc' bs
+          where acc' = combine n acc x
+    combine :: Int -> Map.Map SInt (IntMap.IntMap MPoly)
+               -> Ibp -> Map.Map SInt (IntMap.IntMap MPoly)
+    combine !n !acc !x = Map.unionWith IntMap.union acc (ibpToMap n x)
+    termToMap :: IbpLine -> Map.Map SInt MPoly
+    termToMap !x = Map.singleton (ibpIntegral x) (ibpCfs x, ibpExps x)
+    ibpToMap :: Int -> Ibp -> Map.Map SInt (IntMap.IntMap MPoly)
+    ibpToMap n (Ibp !xs)
+      = Map.map (IntMap.singleton n) $
+        BV.foldl' (Map.unionWith addTerms) Map.empty
+        (BV.map termToMap xs)
+    addTerms :: MPoly -> MPoly -> MPoly
+    addTerms (!x1,!y1) (!x2,!y2) = (R.computeS (R.delay x1 R.++ R.delay x2)
+                                   , R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
+
+extractRow :: Int -> Int -> Map.Map SInt (IntMap.IntMap MPoly) -> Equation
+extractRow offset n m =
+  BV.unfoldr getNext 0
+  where nIntegrals = Map.size m
+        getNext i
+          | i >= nIntegrals = Nothing
+          | otherwise = case IntMap.lookup n (snd $ Map.elemAt i m) of
+            Nothing -> getNext (i + 1)
+            Just x -> Just ((i + offset, x), i + 1)
 
 lookupInPair :: Ord k => Int -> k -> (Map.Map k (), Map.Map k ()) -> Maybe Int
 lookupInPair offset k (m1, m2) =
@@ -285,19 +293,21 @@ main = do
   lPutStrLn $ show c
   let invariants' = zip [0..] (map B.pack invs)
   startParseTime <- getCurrentTime
-  equations <- liftM reverse $
-    if pipes c
-       then incrementy (ibp (B.pack $ intName c) invariants') stdin
-       else withFile eqFile ReadMode $
-            incrementy (ibp (B.pack $ intName c) invariants')
-  let (outerIntegralMap, innerIntegralMap) =
-        Map.partitionWithKey (\ k _ -> isBeyond c k)
-        (Map.fromList $ concatMap (BV.toList . getIntegrals) equations `zip` repeat ())
+  (!nEqs, !eqs) <-
+    let parser = readEquations (ibp (B.pack $ intName c) invariants')
+     in if pipes c
+        then parser stdin
+        else withFile eqFile ReadMode parser
+  print nEqs
+  let eqs' = Map.partitionWithKey (\ k _ -> isBeyond c k) eqs
+      (outerIntegralMap, innerIntegralMap) =
+        both (Map.map (\ _ -> ())) eqs'
       nOuterIntegrals = Map.size outerIntegralMap -- length outerIntegrals
       nIntegrals = nOuterIntegrals + Map.size innerIntegralMap
-      ibpRows = map (ibpToRow nOuterIntegrals (outerIntegralMap, innerIntegralMap))  equations
+      ibpRows = [extractRow 0 i (fst eqs') BV.++ extractRow nOuterIntegrals i (snd eqs')
+                | i <- [0..nEqs - 1]]
   lPutStr "Number of equations: "
-  lPutStrLn $ show (length equations)
+  lPutStrLn $ show nEqs
   lPutStr "Number of integrals: "
   lPutStrLn $ show nIntegrals
   lPutStrLn (concat ["Number of integrals within r="
