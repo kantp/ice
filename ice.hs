@@ -222,7 +222,9 @@ evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
 -- - original row number
 type RowTree s = Map.Map (Int, Int, Int, Int) (Row s)
 buildRowTree :: BV.Vector (Row s) -> RowTree s
-buildRowTree rs = Map.fromList $ BV.toList (BV.imap (\ i r -> ((fst (V.head r), 0, V.length r, i), r)) rs)
+buildRowTree = Map.fromList . BV.toList
+               . BV.filter (not . V.null . snd)
+               . BV.imap (\ i r -> ((fst (V.head r), 0, V.length r, i), r))
 updateRowTree :: (Row s -> Row s) -> RowTree s -> RowTree s
 updateRowTree f rs =
   Map.fromList . Map.elems . Map.filter (not . V.null . snd)  $
