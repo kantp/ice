@@ -68,13 +68,13 @@ isBeyond c (SInt xs) = r > rMax c || s > sMax c
 data Term = Term !Integer !(V.Vector Word8) deriving Show
 -- | One term in an IBP equation.
 data IbpLine = IbpLine { ibpIntegral :: !SInt
-                       , ibpCfs :: !(R.Array V R.DIM1 Integer)
+                       , ibpCfs :: !(BV.Vector Integer)
                        , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
 -- | An IBP equation.
 newtype Ibp = Ibp (BV.Vector IbpLine) deriving Show
 
 -- | A multivariate Polynomial.
-type MPoly = (R.Array V R.DIM1 Integer, R.Array R.U R.DIM2 Word8)
+type MPoly = (BV.Vector Integer, R.Array R.U R.DIM2 Word8)
 type Equation = BV.Vector (Int, MPoly)
 
 -- | Result of successive Monte Carlo runs.

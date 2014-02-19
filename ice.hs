@@ -65,7 +65,7 @@ refill h = B.hGet h (4*1024)
 readEquations :: Parser Ibp -> Handle -> IO (Int, Map.Map SInt (IntMap.IntMap MPoly))
 readEquations parser h = go (0::Int) Map.empty =<< refill h
   where
-    go !n !acc !is = {- } deepseq acc $ -} do
+    go !n !acc !is = do
       when (n > 0 && n `mod` 10000 == 0) ( hPutStr stderr "Parsed equations: "
                                            >> (hPutStr stderr . show) n)
       r <- parseWith (refill h) parser is
@@ -74,7 +74,6 @@ readEquations parser h = go (0::Int) Map.empty =<< refill h
         Done bs x
           | B.null bs -> do
             s <- refill h
-            -- acc' `deepseq`
             if B.null s
                                 then return (n + 1, acc')
                                 else go (n + 1) acc' s
@@ -92,7 +91,7 @@ readEquations parser h = go (0::Int) Map.empty =<< refill h
         (BV.map termToMap xs)
     addTerms :: MPoly -> MPoly -> MPoly
     {-# INLINE addTerms #-}
-    addTerms (!x1,!y1) (!x2,!y2) = (R.computeS (R.delay x1 R.++ R.delay x2)
+    addTerms (!x1,!y1) (!x2,!y2) = ( BV.force $ x1 BV.++ x2
                                    , R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
 
 extractRow :: Int -> Int -> Map.Map SInt (IntMap.IntMap MPoly) -> Equation
@@ -213,7 +212,7 @@ evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   -- treatRow r = V.filter ((/=0) . snd) $ V.convert $ BV.map (second evalPoly) r
   -- evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
   {-# INLINE toPoly #-}
-  toPoly (cs, es) = Poly (R.computeS $ R.map fromInteger cs) es
+  toPoly (cs, es) = Poly (R.fromUnboxed (Z :. BV.length cs) $ (V.convert . BV.map fromInteger) cs) es
   treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
 
 -- | Equations are ordered with the following priority:

@@ -66,7 +66,7 @@ indices intName = do
 collectTerms :: Int -> [Term] -> MPoly
 collectTerms !nVars !ts =
   let !nTerms = length ts
-      !cfs = fromListVector (Z :. nTerms) [ x | (Term x _) <- ts]
+      !cfs = BV.force $ BV.fromList [ x | (Term x _) <- ts]
       !exps = fromUnboxed (Z :. nTerms :. nVars) (V.concat (map (\ (Term _ x) -> x) ts))
   in (cfs, exps)
 
