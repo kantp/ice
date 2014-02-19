@@ -91,6 +91,7 @@ readEquations parser h = go (0::Int) Map.empty =<< refill h
         BV.foldl' (Map.unionWith addTerms) Map.empty
         (BV.map termToMap xs)
     addTerms :: MPoly -> MPoly -> MPoly
+    {-# INLINE addTerms #-}
     addTerms (!x1,!y1) (!x2,!y2) = (R.computeS (R.delay x1 R.++ R.delay x2)
                                    , R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
 
@@ -211,6 +212,7 @@ evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   rs' = BV.fromList (map treatRow rs)
   -- treatRow r = V.filter ((/=0) . snd) $ V.convert $ BV.map (second evalPoly) r
   -- evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
+  {-# INLINE toPoly #-}
   toPoly (cs, es) = Poly (R.computeS $ R.map fromInteger cs) es
   treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
 
