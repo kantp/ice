@@ -9,12 +9,10 @@ module Main
 
 import           Codec.BMP (BMP, packRGBA32ToBMP, writeBMP)
 import           Control.Arrow
-import           Control.Exception (assert)
 import           Control.Monad
 import           Control.Monad.Random
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map)
-import           Data.Array.Repa.Repr.Vector (V)
 import           Data.Attoparsec
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
@@ -22,7 +20,6 @@ import           Data.List
 import qualified Data.Map.Strict as Map
 import qualified Data.IntMap.Strict as IntMap
 import           Data.Maybe
-import           Data.Ord
 import           Data.Proxy
 import           Data.Reflection
 import           Data.Time
@@ -272,9 +269,6 @@ config = Config { inputFile = def &= args &= typ "FILE"
          &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
                     , "a maximal linearly independent subset."]
          &= program "ice"
-
-both :: Arrow a => a b' c' -> a (b', b') (c', c')
-both f = f *** f
 
 main :: IO ()
 main = do
