@@ -62,8 +62,8 @@ getBound r p = 1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..r]]
 refill :: Handle -> IO B.ByteString
 refill h = B.hGet h (4*1024)
 
-readEquations :: Parser Ibp -> Handle -> IO (Int, Map.Map SInt (IntMap.IntMap MPoly))
-readEquations parser h = go (0::Int) Map.empty =<< refill h
+readEquations :: Parser Ibp -> Handle -> IO [Ibp]
+readEquations parser h = go (0 :: Int) [] =<< refill h
   where
     go !n !acc !is = do
       when (n > 0 && n `mod` 10000 == 0) ( hPutStr stderr "Parsed equations: "
@@ -75,34 +75,27 @@ readEquations parser h = go (0::Int) Map.empty =<< refill h
           | B.null bs -> do
             s <- refill h
             if B.null s
-                                then return (n + 1, acc')
-                                else go (n + 1) acc' s
-          | otherwise -> go (n + 1) acc' bs
-          where acc' = combine n acc x
-    combine :: Int -> Map.Map SInt (IntMap.IntMap MPoly)
-               -> Ibp -> Map.Map SInt (IntMap.IntMap MPoly)
-    combine !n !acc !x = Map.unionWith IntMap.union acc (ibpToMap n x)
-    termToMap :: IbpLine -> Map.Map SInt MPoly
-    termToMap !x = Map.singleton (ibpIntegral x) (ibpCfs x, ibpExps x)
-    ibpToMap :: Int -> Ibp -> Map.Map SInt (IntMap.IntMap MPoly)
-    ibpToMap n (Ibp !xs)
-      = Map.map (IntMap.singleton n) $
-        BV.foldl' (Map.unionWith addTerms) Map.empty
-        (BV.map termToMap xs)
+              then return $! (x:acc)
+              else go (n+1) (x:acc) s
+          | otherwise -> go (n+1) (x:acc) bs
+
+getIntegrals :: Ibp -> BV.Vector SInt
+getIntegrals (Ibp x) = BV.map ibpIntegral x
+
+ibpToRow :: Int -> (Map.Map SInt (), Map.Map SInt ()) -> Ibp -> Equation
+ibpToRow offset table (Ibp x) =
+  let
     addTerms :: MPoly -> MPoly -> MPoly
     {-# INLINE addTerms #-}
     addTerms (!x1,!y1) (!x2,!y2) = ( BV.force $ x1 BV.++ x2
                                    , R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
-
-extractRow :: Int -> Int -> Map.Map SInt (IntMap.IntMap MPoly) -> Equation
-extractRow offset n m =
-  BV.unfoldr getNext 0
-  where nIntegrals = Map.size m
-        getNext i
-          | i >= nIntegrals = Nothing
-          | otherwise = case IntMap.lookup n (snd $ Map.elemAt i m) of
-            Nothing -> getNext (i + 1)
-            Just x -> Just ((i + offset, x), i + 1)
+    col (IbpLine i _ _) = fromMaybe (error "integral not found.") (lookupInPair offset i table)
+    term (IbpLine _ cf ex) = (cf, ex)
+    rowmap = BV.foldl'
+             (\ m line -> IntMap.insertWith addTerms (col line) (term line) m)
+             IntMap.empty
+             x
+  in BV.fromList . IntMap.toList $ rowmap
 
 lookupInPair :: Ord k => Int -> k -> (Map.Map k (), Map.Map k ()) -> Maybe Int
 lookupInPair offset k (m1, m2) =
@@ -296,21 +289,22 @@ main = do
   lPutStrLn $ show c
   let invariants' = zip [0..] (map B.pack invs)
   startParseTime <- getCurrentTime
-  (!nEqs, !eqs) <-
+  equations <-
     let parser = readEquations (ibp (B.pack $ intName c) invariants')
-     in if pipes c
-        then parser stdin
-        else withFile eqFile ReadMode parser
-  print nEqs
-  let eqs' = Map.partitionWithKey (\ k _ -> isBeyond c k) eqs
-      (outerIntegralMap, innerIntegralMap) =
-        both (Map.map (\ _ -> ())) eqs'
+    in liftM reverse $
+    if pipes c
+       then parser stdin
+       else withFile eqFile ReadMode parser
+  let (outerIntegralMap, innerIntegralMap) =
+        Map.partitionWithKey (\ k _ -> isBeyond c k)
+        (Map.fromList $ concatMap (BV.toList . getIntegrals) equations `zip` repeat ())
       nOuterIntegrals = Map.size outerIntegralMap -- length outerIntegrals
       nIntegrals = nOuterIntegrals + Map.size innerIntegralMap
-      ibpRows = [extractRow 0 i (fst eqs') BV.++ extractRow nOuterIntegrals i (snd eqs')
-                | i <- [0..nEqs - 1]]
+      ibpRows = map (ibpToRow nOuterIntegrals (outerIntegralMap, innerIntegralMap))  equations
+      -- ibpRows = [extractRow 0 i (fst eqs') BV.++ extractRow nOuterIntegrals i (snd eqs')
+      --           | i <- [0..nEqs - 1]]
   lPutStr "Number of equations: "
-  lPutStrLn $ show nEqs
+  lPutStrLn $ show (length equations)
   lPutStr "Number of integrals: "
   lPutStrLn $ show nIntegrals
   lPutStrLn (concat ["Number of integrals within r="
