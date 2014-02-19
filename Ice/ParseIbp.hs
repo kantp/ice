@@ -57,7 +57,7 @@ indices intName = do
   skipSpace
   string intName
   char '['
-  !inds <- liftM V.fromList $ sepBy (signed decimal) (char ',')
+  !inds <- liftM V.fromList $ sepBy' (signed decimal) (char ',')
   char ']'
   return $! inds
 
