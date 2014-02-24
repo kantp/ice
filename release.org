@@ -13,6 +13,14 @@
 #+LANGUAGE: en
 #+SELECT_TAGS: export
 
+* Version 0.1.0.2
+** New Features
+None.
+** Optimisations
+- Reduced memory footprint.
+- Increased speed.
+** Bugfixes with respect to previous release
+None.
 * Version 0.1.0.1
 ** New Features
 - New option =-p, --pipes= to use stdin and stdout for communication, instead of
