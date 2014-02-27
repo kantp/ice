@@ -1,26 +1,30 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 
 -- | Attoparsec-based parser for integration-by-parts equations.
 module Ice.ParseIbp
-       (ibp)
+       (ibp, evaldIbp)
        where
 
 import           Control.Applicative
 import           Control.DeepSeq
 import           Control.Monad
-import           Data.Attoparsec.Char8
-import qualified Data.ByteString as B
-import           Data.Foldable (asum)
-import           Data.Maybe
-import qualified Data.Vector as BV
-import qualified Data.Vector.Unboxed as V
-import           Debug.Trace
-import           Ice.Types
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map)
 import           Data.Array.Repa.Repr.Vector (V, fromListVector)
+import           Data.Attoparsec.Char8
+import qualified Data.ByteString as B
+import           Data.Foldable (asum)
+import           Data.List (foldl')
+import           Data.Maybe
+import           Data.Reflection
+import qualified Data.Vector as BV
+import qualified Data.Vector.Unboxed as V
 import           Data.Word (Word8)
+import           Debug.Trace
+import           Ice.Fp
+import           Ice.Types
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Given an association list of invariant names, parse an expression
@@ -32,8 +36,15 @@ power xs = do
   !coeff <- asum (map stringInd xs)
   expo <- option 1 $ char '^' *> decimal
   return (coeff, expo)
-    where
-      stringInd (i,s) = string s *> return i
+
+evaldPower :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
+evaldPower xs = do
+  coeff <- asum (map stringInd xs)
+  expo <- option 1 $ char '^' *> decimal
+  return (coeff^expo)
+
+stringInd :: (a, B.ByteString) -> Parser a
+stringInd (i,s) = string s *> return i
 
 -- | Parse a coefficient, which may or may not contain a sign and an
 -- integer.  A missing integer is treated as @1@.  The multiplication
@@ -49,6 +60,12 @@ term xs = do
   factors <- sepBy' (power xs) (char '*')
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i factors)
   return $! Term cf expos
+
+evaldTerm :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
+evaldTerm xs = do
+  cf <- coefficient
+  factors <- sepBy' (evaldPower xs) (char '*')
+  return (foldl' (*) (fromInteger cf) factors)
 
 -- | Parse the indices of an integral.  For example,
 -- @indices \"Int\" \"Int[1,1,2,0]\"@ would yield @[1,1,2,0]@.
@@ -72,7 +89,7 @@ collectTerms !nVars !ts =
 
 -- | Parse one line containing one integral and a polynomial that is
 -- the coefficient of this integral in the equation.
-ibpLine :: B.ByteString -> [(Int, B.ByteString)] -> Parser IbpLine
+ibpLine :: B.ByteString -> [(Int, B.ByteString)] -> Parser (IbpLine MPoly)
 ibpLine intName xs = do
   inds <- indices intName
   skipSpace
@@ -82,13 +99,31 @@ ibpLine intName xs = do
   skipSpace
   poly <- manyTill' (term xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
   let poly' = collectTerms (length xs) poly
-  return $ uncurry (IbpLine (SInt inds)) poly'
+  return $ IbpLine (SInt inds) poly'
+
+evaldIbpLine :: Reifies s Int => B.ByteString -> [(Fp s Int, B.ByteString)] -> Parser (IbpLine (Fp s Int))
+evaldIbpLine intName xs = do
+  inds <- indices intName
+  skipSpace
+  char '*'
+  skipSpace
+  char '('
+  skipSpace
+  poly <- manyTill' (evaldTerm xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
+  let poly' = foldl' (+) 0 poly
+  return $ IbpLine (SInt inds) poly'
 
 -- | Parse one equation.  An equation consists of one or more
 -- 'ibpLine's, terminated by a semicolon (on a separate line).
-ibp :: B.ByteString -> [(Int, B.ByteString)] -> Parser Ibp
+ibp :: B.ByteString -> [(Int, B.ByteString)] -> Parser (Ibp MPoly)
 ibp intName xs = do
   !lines <- manyTill' (ibpLine intName xs) (char ';')
+  skipSpace
+  return $! Ibp (BV.force $ BV.fromList lines)
+
+evaldIbp :: Reifies s Int => B.ByteString -> [(Fp s Int, B.ByteString)] -> Parser (Ibp (Fp s Int))
+evaldIbp intName xs = do
+  !lines <- manyTill' (evaldIbpLine intName xs) (char ';')
   skipSpace
   return $! Ibp (BV.force $ BV.fromList lines)
 

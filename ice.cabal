@@ -55,6 +55,7 @@ executable ice
                      , cmdargs >= 0.10.5
                      , time >= 1.4.0.0
                      , bmp >= 1.2.0.0
+                     , mtl
 
 executable ice-static
   main-is:             ice.hs
@@ -76,3 +77,4 @@ executable ice-static
                      , cmdargs >= 0.10.5
                      , time >= 1.4.0.0
                      , bmp >= 1.2.0.0
+                     , mtl

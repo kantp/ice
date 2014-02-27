@@ -1,17 +1,29 @@
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ExistentialQuantification#-}
 module Ice.Types
 
 where
 
+import           Control.Monad.RWS
 import qualified Data.Array.Repa as R
-import           Data.Array.Repa.Repr.Vector (V)
 import           Data.List (intercalate)
+import qualified Data.Map.Strict as Map
 import           Data.Monoid
 import           Data.Ord
+import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Data.Word (Word8)
+import           Ice.Fp
 import           System.Console.CmdArgs
+
+
 -- | Configuration via cmdargs library.
 data Config = Config { inputFile :: FilePath
                      , dumpFile :: FilePath
@@ -26,6 +38,18 @@ data Config = Config { inputFile :: FilePath
                      , failBound :: Double
                      , pipes :: Bool
                      } deriving (Show, Data, Typeable)
+
+data StateData = StateData { system :: LinSystem
+                           , integralMaps :: (Map.Map SInt (), Map.Map SInt ())
+                           } deriving Show
+
+-- | State Monad of Ice.
+type IceMonad a = RWST Config () StateData IO a
+
+data LinSystem = PolynomialSystem [Equation MPoly]
+               | FpSystem { p :: Int
+                          , as :: V.Vector Int
+                          , mijs :: [Equation Int] } deriving Show
 
 -- | A scalar integral is represented by its indices.
 newtype SInt = SInt (V.Vector Int) deriving Eq
@@ -67,17 +91,31 @@ isBeyond c (SInt xs) = r > rMax c || s > sMax c
 --  | One term in a polynomial in the kinematic invariants and d
 data Term = Term !Integer !(V.Vector Word8) deriving Show
 -- | One term in an IBP equation.
-data IbpLine = IbpLine { ibpIntegral :: !SInt
-                       , ibpCfs :: !(BV.Vector Integer)
-                       , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
+data IbpLine a = IbpLine !SInt !a deriving (Show, Functor)
+-- data IbpLine = IbpLine { ibpIntegral :: !SInt
+--                        , ibpCfs :: !(BV.Vector Integer)
+--                        , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
 -- | An IBP equation.
-newtype Ibp = Ibp (BV.Vector IbpLine) deriving Show
+newtype Ibp a = Ibp (BV.Vector (IbpLine a)) deriving (Show, Functor)
 
 -- | A multivariate Polynomial.
 type MPoly = (BV.Vector Integer, R.Array R.U R.DIM2 Word8)
-type Equation = BV.Vector (Int, MPoly)
+
+-- | Dummy 'Num' instance for 'MPoly'.  We only need (primitive) addition.
+instance Num MPoly where
+  (+) (!x1,!y1) (!x2,!y2) =
+    ( BV.force $ x1 BV.++ x2, R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
+  (*) =         error "(*) not implemented for multivariate polynomials."
+  signum =      error "signum not implemented for multivariate polynomials."
+  fromInteger = error "fromInteger not implemented for multivariate polynomials."
+  abs =         error "abs not implemented for multivariate polynomials."
+
+type Equation a = BV.Vector (Int, a)
 
 -- | Result of successive Monte Carlo runs.
 data TestResult = Unlucky -- ^ We have hit a bad evaluation point and have to discard the result of this run.
                 | Restart -- ^ The previous run had a bad evaluation point, and we have to restart.
                 | Good !Double -- ^ We have not detected a bad point, and the chance that our result is wrong is less than this.
+
+
+

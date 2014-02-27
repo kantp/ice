@@ -11,14 +11,15 @@ import           Codec.BMP (BMP, packRGBA32ToBMP, writeBMP)
 import           Control.Arrow
 import           Control.Monad
 import           Control.Monad.Random
+import           Control.Monad.RWS
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map)
 import           Data.Attoparsec
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
+import qualified Data.IntMap.Strict as IntMap
 import           Data.List
 import qualified Data.Map.Strict as Map
-import qualified Data.IntMap.Strict as IntMap
 import           Data.Maybe
 import           Data.Proxy
 import           Data.Reflection
@@ -59,7 +60,7 @@ getBound r p = 1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..r]]
 refill :: Handle -> IO B.ByteString
 refill h = B.hGet h (4*1024)
 
-readEquations :: Parser Ibp -> Handle -> IO [Ibp]
+readEquations :: Parser (Ibp a) -> Handle -> IO [Ibp a]
 readEquations parser h = go (0 :: Int) [] =<< refill h
   where
     go !n !acc !is = do
@@ -76,20 +77,17 @@ readEquations parser h = go (0 :: Int) [] =<< refill h
               else go (n+1) (x:acc) s
           | otherwise -> go (n+1) (x:acc) bs
 
-getIntegrals :: Ibp -> BV.Vector SInt
-getIntegrals (Ibp x) = BV.map ibpIntegral x
+getIntegrals :: Ibp a -> BV.Vector SInt
+getIntegrals (Ibp xs) = BV.map (\ (IbpLine x _) -> x) xs
 
-ibpToRow :: Int -> (Map.Map SInt (), Map.Map SInt ()) -> Ibp -> Equation
-ibpToRow offset table (Ibp x) =
+ibpToRow :: Num a => (Map.Map SInt (), Map.Map SInt ()) -> Ibp a -> Equation a
+ibpToRow table (Ibp x) =
   let
-    addTerms :: MPoly -> MPoly -> MPoly
-    {-# INLINE addTerms #-}
-    addTerms (!x1,!y1) (!x2,!y2) = ( BV.force $ x1 BV.++ x2
-                                   , R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
-    col (IbpLine i _ _) = fromMaybe (error "integral not found.") (lookupInPair offset i table)
-    term (IbpLine _ cf ex) = (cf, ex)
+    offset = Map.size . fst $ table
+    col (IbpLine i _) = fromMaybe (error "integral not found.") (lookupInPair offset i table)
+    term (IbpLine _ t) = t
     rowmap = BV.foldl'
-             (\ m line -> IntMap.insertWith addTerms (col line) (term line) m)
+             (\ m line -> IntMap.insertWith (+) (col line) (term line) m)
              IntMap.empty
              x
   in BV.fromList . IntMap.toList $ rowmap
@@ -153,9 +151,9 @@ probeStep (!rsDone, !rs) !d !j !i
     i' = pivotRowNumber:i
     rsDone' = snd normalisedPivotRow:rsDone
 
-performForwardElim :: Handle -> Double -> Int -> Int -> [Equation]
+iteratedForwardElim :: Handle -> Double -> Int -> Int -> [Equation MPoly]
                       -> IO ([V.Vector (Int, Int)], V.Vector Int, V.Vector Int, Int)
-performForwardElim h goal nInvs nInts eqs = do
+iteratedForwardElim h goal nInvs nInts eqs = do
   p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
   xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
   hPutStrLn h ("Probing for p = " Data.List.++ show p)
@@ -185,7 +183,7 @@ performForwardElim h goal nInvs nInts eqs = do
                                  if bound'' < goal then return (rs', j, i, p)
                                  else redoTest r bound'' rs
                  Restart -> hPutStrLn h "Unlucky evaluation point(s), restarting." >>
-                   performForwardElim h goal nInvs nInts eqs
+                   iteratedForwardElim h goal nInvs nInts eqs
                  Unlucky -> hPutStrLn h "Unlucky evaluation point, discarding." >>
                    redoTest r bound splitRows
              splitRows = partitionEqs (V.toList i) eqs
@@ -195,7 +193,7 @@ performForwardElim h goal nInvs nInts eqs = do
 evalIbps :: forall s . Reifies s Int
             => Int
             -> Array U DIM1 (Fp s Int)
-            -> [Equation]
+            -> [Equation MPoly]
             -> Matrix s
 evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
   rs' = BV.fromList (map treatRow rs)
@@ -226,7 +224,7 @@ updateRowTree f rs =
 testMatrixFwd :: forall s . Reifies s Int
                  => Int
                  -> V.Vector Int
-                 -> [Equation]
+                 -> [Equation MPoly]
                  -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
 testMatrixFwd n xs rs = (rs',d,j,i) where
   -- (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ k v -> ((k,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
@@ -270,9 +268,77 @@ config = Config { inputFile = def &= args &= typ "FILE"
                     , "a maximal linearly independent subset."]
          &= program "ice"
 
+-- initialise :: IO StateData
+-- initialise = do
+--   c <- cmdArgs config
+--   return (StateData c undefined undefined undefined)
+
+foo :: IceMonad ()
+foo = do
+  fname <- reader inputFile
+  liftIO $ print fname
+
+-- | Read a system of equations.
+--
+-- Depending on the configuration, the system is read from stdin or
+-- the value of the parameter inputFile.
+--
+-- unless the value of failBound is positive, we evaluate the
+-- polynomials already during parsing, thus reducing the memory
+-- footprint.
+initialiseEquations :: Config -> IO StateData
+initialiseEquations c =
+  if failBound c > 0
+    then do
+         let invs = zip [0..] invNames
+             parser = readEquations (ibp (B.pack $ intName c) invs)
+         equations <- parseAction parser
+         let table = integrals equations
+         return (StateData (PolynomialSystem $ processEqs table equations) table)
+    else do
+         p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
+         xs <- V.generateM (length $ invariants c) (\_ -> getRandomR (1,p))
+         equations <- unwrap p $ parseAndEval xs
+         let table = integrals equations
+         return (StateData (FpSystem p xs (processEqs table equations)) table)
+  where
+    parseAction =
+        if pipes c then flip ($) stdin -- \ parser -> parser stdin
+        else withFile (inputFile c) ReadMode
+    invNames = map B.pack (invariants c)
+    integrals eqs = 
+        Map.partitionWithKey (\ k _ -> isBeyond c k)
+        (Map.fromList $ concatMap (BV.toList . getIntegrals) eqs `zip` repeat ())
+    processEqs table = map (ibpToRow table)
+    parseAndEval :: Reifies s Int => V.Vector Int -> IO [Ibp (Fp s Int)]
+    parseAndEval xs = do
+      let invs = zip (V.toList (V.map fromIntegral xs)) invNames
+          parser = readEquations (evaldIbp (B.pack $ intName c) invs)
+      parseAction parser
+    unwrap :: Int -> (forall s . Reifies s Int => IO [Ibp (Fp s Int)]) -> IO [Ibp Int]
+    unwrap p x = reify p (\ (_ :: Proxy s) -> liftM ((map . fmap) unFp) (x :: IO [Ibp (Fp s Int)]) )
+      
+
 main :: IO ()
 main = do
   c <- cmdArgs config
+  initialState <- initialiseEquations c
+  (result, finalState, log) <- runRWST foo c initialState
+  print log
+  print finalState
+  
+
+-- main :: IO ()
+-- main = do
+
+  -- foo = do
+--   initialState <- initialise
+--   evalStateT ice initialState
+
+-- ice :: IO (IceState ())
+-- ice = do
+{-
+c <- cmdArgs config
   let eqFile = inputFile c
       invs = invariants c
   lFile <- openFile (logFile c) WriteMode
@@ -305,7 +371,7 @@ main = do
                     , show (rMax c), ", s=", show (sMax c)
                     , ": ", show (Map.size innerIntegralMap)])
   startReductionTime <- getCurrentTime
-  (rs', j, i, p) <- performForwardElim lFile (failBound c) (length invs) nIntegrals ibpRows
+  (rs', j, i, p) <- iteratedForwardElim lFile (failBound c) (length invs) nIntegrals ibpRows
   lPutStr "Number of linearly independent equations: "
   lPutStrLn $ show (V.length i)
   let eqList = (if sortList c then sort else id) (V.toList i)
@@ -355,3 +421,4 @@ main = do
                                       then Map.elemAt n (fst intmap)
                                       else Map.elemAt (n - Map.size (fst intmap)) (snd intmap)
             in show elt
+-}
