@@ -13,7 +13,7 @@ import           Control.Monad
 import           Control.Monad.Random
 import           Control.Monad.RWS
 import qualified Data.Array.Repa as R
-import           Data.Array.Repa hiding (map)
+import           Data.Array.Repa hiding (map, (++))
 import           Data.Attoparsec
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
@@ -151,26 +151,29 @@ probeStep (!rsDone, !rs) !d !j !i
     i' = pivotRowNumber:i
     rsDone' = snd normalisedPivotRow:rsDone
 
-iteratedForwardElim :: Handle -> Double -> Int -> Int -> [Equation MPoly]
-                      -> IO ([V.Vector (Int, Int)], V.Vector Int, V.Vector Int, Int)
-iteratedForwardElim h goal nInvs nInts eqs = do
-  p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
-  xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
-  hPutStrLn h ("Probing for p = " Data.List.++ show p)
-  hPutStrLn h ("Random points: " Data.List.++ show (V.toList xs)) >> hFlush h
-  let (!rs',_,!j,!i) = withMod p $ testMatrixFwd nInts xs eqs
+iteratedForwardElim :: IceMonad ([V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
+iteratedForwardElim = do
+  PolynomialSystem eqs <- gets system
+  goal <- asks failBound
+  nInvs <- asks (length . invariants)
+  p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
+  xs <- liftIO $ V.generateM nInvs (\_ -> getRandomR (1,p))
+  tell' "Probing for p = " p
+  tell' "Random points: " (V.toList xs)
+  let (!rs',_,!j,!i) = withMod p $ testMatrixFwd xs eqs
       r = V.length i
       bound = getBound r p
+      showBound = tell' "The probability that too many equations were discarded is less than "
   showBound bound
   if bound < goal
-    then return (rs', j, i, p)
+    then return (rs', undefined, j, i)
     else let redoTest r bound rs = do
-               hPutStrLn h "Iterating to decrease probability of failure."
-               p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
-               xs <- V.generateM nInvs (\_ -> getRandomR (1,p))
-               hPutStrLn h ("Probing for p = " Data.List.++ show p)
-               hPutStrLn h ("Random points: " Data.List.++ show (V.toList xs)) >> hFlush h
-               let (_,_,_,i') = withMod p $ testMatrixFwd nInts xs eqs
+               tell "Iterating to decrease probability of failure."
+               p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
+               xs <- liftIO $ V.generateM nInvs (\_ -> getRandomR (1,p))
+               tell' "Probing for p = " p
+               tell' "Random points: " (V.toList xs)
+               let (_,_,_,i') = withMod p $ testMatrixFwd xs eqs
                    r' = V.length i'
                    result = case compare (r,i) (r',i') of
                      EQ -> Good (getBound r p)
@@ -180,25 +183,20 @@ iteratedForwardElim h goal nInvs nInts eqs = do
                  Good bound' -> let bound'' = bound * bound'
                                 in
                                  showBound bound'' >>
-                                 if bound'' < goal then return (rs', j, i, p)
+                                 if bound'' < goal then return (rs', undefined, j, i)
                                  else redoTest r bound'' rs
-                 Restart -> hPutStrLn h "Unlucky evaluation point(s), restarting." >>
-                   iteratedForwardElim h goal nInvs nInts eqs
-                 Unlucky -> hPutStrLn h "Unlucky evaluation point, discarding." >>
+                 Restart -> tell "Unlucky evaluation point(s), restarting." >>
+                   iteratedForwardElim
+                 Unlucky -> tell "Unlucky evaluation point, discarding." >>
                    redoTest r bound splitRows
              splitRows = partitionEqs (V.toList i) eqs
          in redoTest r bound splitRows
-  where showBound b = hPutStrLn h ("The probability that too many equations were discarded is less than " Data.List.++ show b)
 
 evalIbps :: forall s . Reifies s Int
-            => Int
-            -> Array U DIM1 (Fp s Int)
+            => Array U DIM1 (Fp s Int)
             -> [Equation MPoly]
-            -> Matrix s
-evalIbps n xs rs = Matrix { nCols = n, rows = rs' } where
-  rs' = BV.fromList (map treatRow rs)
-  -- treatRow r = V.filter ((/=0) . snd) $ V.convert $ BV.map (second evalPoly) r
-  -- evalPoly (cs, es) = multiEval xs (Poly (R.computeS $ R.map fromInteger cs) es)
+            -> BV.Vector (Row s)
+evalIbps xs rs = BV.fromList (map treatRow rs)  where
   {-# INLINE toPoly #-}
   toPoly (cs, es) = Poly (R.fromUnboxed (Z :. BV.length cs) $ (V.convert . BV.map fromInteger) cs) es
   treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
@@ -222,14 +220,13 @@ updateRowTree f rs =
 -- toRowTree rs = Map.fromList (map (\ (x, y, z) -> ((V.length z, x, y), z) ) rs)
 
 testMatrixFwd :: forall s . Reifies s Int
-                 => Int
-                 -> V.Vector Int
+                 => V.Vector Int
                  -> [Equation MPoly]
                  -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
-testMatrixFwd n xs rs = (rs',d,j,i) where
+testMatrixFwd xs rs = (rs',d,j,i) where
   -- (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ k v -> ((k,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
-  (rs', d, j, i) = probeStep ([],  buildRowTree (rows m)) 1 [] []
-  m = evalIbps n xs' rs
+  (rs', d, j, i) = probeStep ([],  buildRowTree m) 1 [] []
+  m = evalIbps xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
 withMod :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int, V.Vector Int))
@@ -268,16 +265,6 @@ config = Config { inputFile = def &= args &= typ "FILE"
                     , "a maximal linearly independent subset."]
          &= program "ice"
 
--- initialise :: IO StateData
--- initialise = do
---   c <- cmdArgs config
---   return (StateData c undefined undefined undefined)
-
-foo :: IceMonad ()
-foo = do
-  fname <- reader inputFile
-  liftIO $ print fname
-
 -- | Read a system of equations.
 --
 -- Depending on the configuration, the system is read from stdin or
@@ -286,22 +273,12 @@ foo = do
 -- unless the value of failBound is positive, we evaluate the
 -- polynomials already during parsing, thus reducing the memory
 -- footprint.
-initialiseEquations :: Config -> IO StateData
-initialiseEquations c =
-  if failBound c > 0
-    then do
-         let invs = zip [0..] invNames
-             parser = readEquations (ibp (B.pack $ intName c) invs)
-         equations <- parseAction parser
-         let table = integrals equations
-         return (StateData (PolynomialSystem $ processEqs table equations) table)
-    else do
-         p <- liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
-         xs <- V.generateM (length $ invariants c) (\_ -> getRandomR (1,p))
-         equations <- unwrap p $ parseAndEval xs
-         let table = integrals equations
-         return (StateData (FpSystem p xs (processEqs table equations)) table)
-  where
+initialiseEquations :: IceMonad ()
+initialiseEquations = do
+  startTime <- liftIO getCurrentTime
+  c <- ask
+  tell' "Configuration: " c
+  let
     parseAction =
         if pipes c then flip ($) stdin -- \ parser -> parser stdin
         else withFile (inputFile c) ReadMode
@@ -317,56 +294,71 @@ initialiseEquations c =
       parseAction parser
     unwrap :: Int -> (forall s . Reifies s Int => IO [Ibp (Fp s Int)]) -> IO [Ibp Int]
     unwrap p x = reify p (\ (_ :: Proxy s) -> liftM ((map . fmap) unFp) (x :: IO [Ibp (Fp s Int)]) )
-      
+  if failBound c > 0
+    then do
+         let invs = zip [0..] invNames
+             parser = readEquations (ibp (B.pack $ intName c) invs)
+         equations <- liftIO $ parseAction parser
+         let table = integrals equations
+         put (StateData (PolynomialSystem $ processEqs table equations)
+                 table
+                (Map.size (fst table) + Map.size (snd table)))
+    else do
+         p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
+         xs <- liftIO $ V.generateM (length $ invariants c) (\_ -> getRandomR (1,p))
+         equations <- liftIO $ unwrap p $ parseAndEval xs
+         let table = integrals equations
+         put (StateData (FpSystem p xs (processEqs table equations))
+                 table
+                (Map.size (fst table) + Map.size (snd table)))
+  s <- get
+  endTime <- liftIO getCurrentTime
+  tell' "Number of equations: " (nEq . system $ s)
+  tell' "Number of integrals: " (nIntegrals s)
+  tell' "Wall time needed for reading and preparing equations: " (diffUTCTime endTime startTime)
+
+tell' :: (Show a, MonadWriter String m) => String -> a -> m ()
+tell' x y = tell (x ++ show y ++ "\n")
+
+performElimination :: IceMonad ()
+performElimination = do
+  startTime <- liftIO getCurrentTime
+  s <- gets system
+  (rs', _, j, i) <-  case s of
+        FpSystem p as rs -> return $ withMod p $ probeStep ([], buildRowTree (eqsToRows rs)) 1 [] []
+        PolynomialSystem _ -> iteratedForwardElim
+  modify (\x -> x {system = FpSolved rs' i j})
+  endTime <- liftIO getCurrentTime
+  nlieq <- gets (V.length . rowNumbers . system) -- number of linearly independent equations.
+  tell' "Number of linearly independent equations: " nlieq
+  tell' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
+                          
+eqsToRows :: forall s . Reifies s Int => [Equation Int] -> BV.Vector (Row s)
+eqsToRows xs = BV.fromList $ map (V.convert . BV.map (second fromIntegral)) xs
+
+reportResult :: IceMonad ()
+reportResult = do
+  s <- gets system
+  case s of
+    FpSolved image rowNumbers pivotColumnNumbers ->
+      tell' "Linearly independent equations: " rowNumbers
 
 main :: IO ()
 main = do
   c <- cmdArgs config
-  initialState <- initialiseEquations c
-  (result, finalState, log) <- runRWST foo c initialState
-  print log
+  (result, finalState, log) <- runRWST ice c undefined
+  putStrLn log
   print finalState
+  where
+    ice = do
+      initialiseEquations
+      performElimination
+      reportResult
   
-
--- main :: IO ()
--- main = do
-
-  -- foo = do
---   initialState <- initialise
---   evalStateT ice initialState
 
 -- ice :: IO (IceState ())
 -- ice = do
 {-
-c <- cmdArgs config
-  let eqFile = inputFile c
-      invs = invariants c
-  lFile <- openFile (logFile c) WriteMode
-  let lPutStr = hPutStr lFile
-      lPutStrLn = hPutStrLn lFile
-  lPutStrLn "ICE -- Integration-By-Parts Chooser of Equations"
-  lPutStr "Command line arguments: "
-  lPutStrLn $ show c
-  let invariants' = zip [0..] (map B.pack invs)
-  startParseTime <- getCurrentTime
-  equations <-
-    let parser = readEquations (ibp (B.pack $ intName c) invariants')
-    in liftM reverse $
-    if pipes c
-       then parser stdin
-       else withFile eqFile ReadMode parser
-  let (outerIntegralMap, innerIntegralMap) =
-        Map.partitionWithKey (\ k _ -> isBeyond c k)
-        (Map.fromList $ concatMap (BV.toList . getIntegrals) equations `zip` repeat ())
-      nOuterIntegrals = Map.size outerIntegralMap -- length outerIntegrals
-      nIntegrals = nOuterIntegrals + Map.size innerIntegralMap
-      ibpRows = map (ibpToRow nOuterIntegrals (outerIntegralMap, innerIntegralMap))  equations
-      -- ibpRows = [extractRow 0 i (fst eqs') BV.++ extractRow nOuterIntegrals i (snd eqs')
-      --           | i <- [0..nEqs - 1]]
-  lPutStr "Number of equations: "
-  lPutStrLn $ show (length equations)
-  lPutStr "Number of integrals: "
-  lPutStrLn $ show nIntegrals
   lPutStrLn (concat ["Number of integrals within r="
                     , show (rMax c), ", s=", show (sMax c)
                     , ": ", show (Map.size innerIntegralMap)])
@@ -379,10 +371,10 @@ c <- cmdArgs config
   mapM_ print eqList
   mapM_ (lPutStrLn . show) eqList
   endReductionTime <- getCurrentTime
-  when (visualize c) (writeBMP (inputFile c Data.List.++ ".bmp") (sparsityBMP nIntegrals
+  when (visualize c) (writeBMP (inputFile c ++ ".bmp") (sparsityBMP nIntegrals
         (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) [0..length ibpRows - 1])))
-  when (visualize c) (writeBMP (inputFile c Data.List.++ ".select.bmp") (sparsityBMP nIntegrals (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
-  when (visualize c) (writeBMP (inputFile c Data.List.++ ".forward.bmp") (sparsityBMP nIntegrals (map (V.map fst) rs')))
+  when (visualize c) (writeBMP (inputFile c ++ ".select.bmp") (sparsityBMP nIntegrals (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
+  when (visualize c) (writeBMP (inputFile c ++ ".forward.bmp") (sparsityBMP nIntegrals (map (V.map fst) rs')))
   when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) eqList))
 
   let (reducibleIntegrals, irreducibleIntegrals) =
@@ -402,7 +394,7 @@ c <- cmdArgs config
                                      . reverse) rs'))
     lPutStrLn "Final representations of the integrals will look like:"
     mapM_ (lPutStrLn . printRow (outerIntegralMap, innerIntegralMap))  rs''
-    when (visualize c) (writeBMP (inputFile c Data.List.++ ".solved.bmp") (sparsityBMP nIntegrals (reverse rs'')))
+    when (visualize c) (writeBMP (inputFile c ++ ".solved.bmp") (sparsityBMP nIntegrals (reverse rs'')))
 
   lPutStrLn "Timings (wall time):"
   lPutStr "Parsing and preparing equations: "

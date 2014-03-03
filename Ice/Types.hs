@@ -41,15 +41,23 @@ data Config = Config { inputFile :: FilePath
 
 data StateData = StateData { system :: LinSystem
                            , integralMaps :: (Map.Map SInt (), Map.Map SInt ())
+                           , nIntegrals :: Int
                            } deriving Show
 
 -- | State Monad of Ice.
-type IceMonad a = RWST Config () StateData IO a
+type IceMonad a = RWST Config String StateData IO a
 
 data LinSystem = PolynomialSystem [Equation MPoly]
                | FpSystem { p :: Int
                           , as :: V.Vector Int
-                          , mijs :: [Equation Int] } deriving Show
+                          , mijs :: [Equation Int] }
+               | FpSolved { image :: [(V.Vector (Int, Int))]
+                          , rowNumbers :: V.Vector Int
+                          , pivotColumnNumbers :: V.Vector Int} deriving Show
+
+nEq :: LinSystem -> Int
+nEq (PolynomialSystem xs) = length xs
+nEq (FpSystem _ _ xs) = length xs
 
 -- | A scalar integral is represented by its indices.
 newtype SInt = SInt (V.Vector Int) deriving Eq
