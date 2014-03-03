@@ -12,7 +12,7 @@ module Ice.Fp
   , unFp, symmetricRep
   , getModulus
   , normalise
-  , Row, Matrix (..), multRow, addRows
+  , Row, multRow, addRows
   , Poly (..), multiEval, multiEvalBulk
   )  where
 
@@ -89,10 +89,6 @@ modInv x = let (_, inverse, _) = eea (unFp x) (getModulus x)
 -- | Sparse row of a matrix.  First entry of any pair is the column
 -- index, snd entry the value.
 type Row s = V.Vector (Int, Fp s Int)
--- | Matrix in compressed row format.
-data Matrix s = Matrix { nCols :: !Int
-                       , rows :: !(BV.Vector (Row s)) }
-                deriving (Show, Eq)
 
 {-# INLINE multRow #-}
 multRow 0 _ = V.empty

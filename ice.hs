@@ -98,15 +98,16 @@ lookupInPair offset k (m1, m2) =
     Nothing -> liftM (+ offset) (Map.lookupIndex k m2)
     x -> x
 
-unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector Int])) -> [V.Vector Int]
-unwrapBackGauss p rs = let (_, res) =  reify p (\ (_ :: Proxy s) -> first unFp {-symmetricRep-} (rs :: (Fp s Int, [V.Vector Int])))
-                       in res
+unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector (Int, Fp s Int)])) -> [V.Vector (Int, Int)]
+unwrapBackGauss p rs =
+  let (_, res) =  reify p (\ (_ :: Proxy s) -> (unFp *** map (V.map (second unFp))) (rs :: (Fp s Int, [V.Vector (Int, Fp s Int)])))
+  in res
 
 backGauss :: forall s . Reifies s Int
-             => ([V.Vector Int], [Row s])
-             -> (Fp s Int, [V.Vector Int])
+             => ([V.Vector (Int, Fp s Int)], [Row s])
+             -> (Fp s Int, [V.Vector (Int, Fp s Int)])
 backGauss (!rsDone, []) = (1, rsDone)
-backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (V.map fst pivotRow:rsDone, rs')
+backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (pivotRow:rsDone, rs')
   where
     (pivotColumn, invPivot) = second recip (V.head pivotRow)
     rs' = map pivotOperation rs
@@ -129,9 +130,9 @@ probeStep :: forall s . Reifies s Int
              -> Fp s Int
              -> [Int]
              -> [Int]
-             -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
+             -> (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int)
 probeStep (!rsDone, !rs) !d !j !i
-  | Map.null rs = (rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+  | Map.null rs = (p,rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
   | otherwise =
     probeStep (rsDone', rows') d' j' i'
   where
@@ -150,30 +151,24 @@ probeStep (!rsDone, !rs) !d !j !i
     rows' = modifiedRows `Map.union` ignoreRows
     i' = pivotRowNumber:i
     rsDone' = snd normalisedPivotRow:rsDone
+    p = getModulus d
 
-iteratedForwardElim :: IceMonad ([V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
+iteratedForwardElim :: IceMonad (Int, [V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
 iteratedForwardElim = do
   PolynomialSystem eqs <- gets system
   goal <- asks failBound
-  nInvs <- asks (length . invariants)
-  p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
-  xs <- liftIO $ V.generateM nInvs (\_ -> getRandomR (1,p))
-  tell' "Probing for p = " p
-  tell' "Random points: " (V.toList xs)
-  let (!rs',_,!j,!i) = withMod p $ testMatrixFwd xs eqs
+  (p, xs) <- choosePoints
+  let (!rs',_,!j,!i) = withMod' p $ testMatrixFwd xs eqs
       r = V.length i
       bound = getBound r p
       showBound = tell' "The probability that too many equations were discarded is less than "
   showBound bound
   if bound < goal
-    then return (rs', undefined, j, i)
+    then return (p, rs', undefined, j, i)
     else let redoTest r bound rs = do
                tell "Iterating to decrease probability of failure."
-               p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
-               xs <- liftIO $ V.generateM nInvs (\_ -> getRandomR (1,p))
-               tell' "Probing for p = " p
-               tell' "Random points: " (V.toList xs)
-               let (_,_,_,i') = withMod p $ testMatrixFwd xs eqs
+               (p, xs) <- choosePoints
+               let (_,_,_,i') = withMod' p $ testMatrixFwd xs eqs
                    r' = V.length i'
                    result = case compare (r,i) (r',i') of
                      EQ -> Good (getBound r p)
@@ -183,7 +178,7 @@ iteratedForwardElim = do
                  Good bound' -> let bound'' = bound * bound'
                                 in
                                  showBound bound'' >>
-                                 if bound'' < goal then return (rs', undefined, j, i)
+                                 if bound'' < goal then return (p, rs', undefined, j, i)
                                  else redoTest r bound'' rs
                  Restart -> tell "Unlucky evaluation point(s), restarting." >>
                    iteratedForwardElim
@@ -192,13 +187,22 @@ iteratedForwardElim = do
              splitRows = partitionEqs (V.toList i) eqs
          in redoTest r bound splitRows
 
+choosePoints :: IceMonad (Int, V.Vector Int)
+choosePoints = do
+  nInvs <- asks (length . invariants)
+  p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
+  xs <- liftIO $ V.generateM nInvs (\_ -> getRandomR (1,p))
+  tell' "Probing for p = " p
+  tell' "Random points: " (V.toList xs)
+  return (p, xs)
+
 evalIbps :: forall s . Reifies s Int
             => Array U DIM1 (Fp s Int)
             -> [Equation MPoly]
             -> BV.Vector (Row s)
 evalIbps xs rs = BV.fromList (map treatRow rs)  where
   {-# INLINE toPoly #-}
-  toPoly (cs, es) = Poly (R.fromUnboxed (Z :. BV.length cs) $ (V.convert . BV.map fromInteger) cs) es
+  toPoly (MPoly (cs, es)) = Poly (R.fromUnboxed (Z :. BV.length cs) $ (V.convert . BV.map fromInteger) cs) es
   treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
 
 -- | Equations are ordered with the following priority:
@@ -216,23 +220,32 @@ updateRowTree :: (Row s -> Row s) -> RowTree s -> RowTree s
 updateRowTree f rs =
   Map.fromList . Map.elems . Map.filter (not . V.null . snd)  $
   Map.mapWithKey (\ (_, n, t, i) r -> let r' = f r in ((fst (V.head r'), n+1, t, i), r')) rs
--- toRowTree :: [(Int, Int, Row s)] -> RowTree s
--- toRowTree rs = Map.fromList (map (\ (x, y, z) -> ((V.length z, x, y), z) ) rs)
 
 testMatrixFwd :: forall s . Reifies s Int
                  => V.Vector Int
                  -> [Equation MPoly]
                  -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
 testMatrixFwd xs rs = (rs',d,j,i) where
-  -- (rs', d, j, i) = probeStep ([],  BV.toList . BV.imap (\ k v -> ((k,(V.length v, fst (V.head v))), v)) $ rows m) 1 [] []
-  (rs', d, j, i) = probeStep ([],  buildRowTree m) 1 [] []
+  (_, rs', d, j, i) = probeStep ([],  buildRowTree m) 1 [] []
   m = evalIbps xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
-withMod :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int, V.Vector Int))
+withMod :: Int -> (forall s . Reifies s Int => (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))
+           -> (Int, [V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
+withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))))
+  where symmetricRep' (p,rs,d,j,i) = (p,map (V.map (second unFp)) rs,unFp d,j,i)
+
+withMod' :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int, V.Vector Int))
            -> ([V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
-withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
+withMod' m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
   where symmetricRep' (rs,d,j,i) = (map (V.map (second unFp)) rs,unFp d,j,i)
+
+writeSparsityBMP :: FilePath -> IceMonad ()
+writeSparsityBMP fName = do
+  pattern <- gets (sparsityPattern . system)
+  (m1, m2) <- gets integralMaps
+  let n = Map.size m1 + Map.size m2
+  liftIO (writeBMP fName (sparsityBMP n pattern))
 
 sparsityBMP :: Int -> [V.Vector Int] -> BMP
 sparsityBMP width rs = packRGBA32ToBMP width (length rs) rgba
@@ -280,7 +293,7 @@ initialiseEquations = do
   tell' "Configuration: " c
   let
     parseAction =
-        if pipes c then flip ($) stdin -- \ parser -> parser stdin
+        if pipes c then flip ($) stdin
         else withFile (inputFile c) ReadMode
     invNames = map B.pack (invariants c)
     integrals eqs = 
@@ -304,8 +317,7 @@ initialiseEquations = do
                  table
                 (Map.size (fst table) + Map.size (snd table)))
     else do
-         p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
-         xs <- liftIO $ V.generateM (length $ invariants c) (\_ -> getRandomR (1,p))
+         (p, xs) <- choosePoints
          equations <- liftIO $ unwrap p $ parseAndEval xs
          let table = integrals equations
          put (StateData (FpSystem p xs (processEqs table equations))
@@ -313,9 +325,14 @@ initialiseEquations = do
                 (Map.size (fst table) + Map.size (snd table)))
   s <- get
   endTime <- liftIO getCurrentTime
+  nInner <- liftM (Map.size . snd) $ gets integralMaps
   tell' "Number of equations: " (nEq . system $ s)
   tell' "Number of integrals: " (nIntegrals s)
+  tell (concat ["Number of integrals within r="
+               , show (rMax c), ", s=", show (sMax c)
+               , ": ", show nInner])
   tell' "Wall time needed for reading and preparing equations: " (diffUTCTime endTime startTime)
+  when (visualize c) (writeSparsityBMP (inputFile c ++ ".bmp"))
 
 tell' :: (Show a, MonadWriter String m) => String -> a -> m ()
 tell' x y = tell (x ++ show y ++ "\n")
@@ -324,66 +341,69 @@ performElimination :: IceMonad ()
 performElimination = do
   startTime <- liftIO getCurrentTime
   s <- gets system
-  (rs', _, j, i) <-  case s of
-        FpSystem p as rs -> return $ withMod p $ probeStep ([], buildRowTree (eqsToRows rs)) 1 [] []
+  c <- ask
+  (p, rs', _, j, i) <-  case s of
+        FpSystem p _ rs -> return $ withMod p $ probeStep ([], buildRowTree (eqsToRows rs)) 1 [] []
         PolynomialSystem _ -> iteratedForwardElim
-  modify (\x -> x {system = FpSolved rs' i j})
-  endTime <- liftIO getCurrentTime
-  nlieq <- gets (V.length . rowNumbers . system) -- number of linearly independent equations.
+  let i' = (if sortList c then sort else id) (V.toList i)
+  modify (\x -> x {system = FpSolved p rs' i' j})
+  nlieq <- gets (length . rowNumbers . system) -- number of linearly independent equations.
   tell' "Number of linearly independent equations: " nlieq
+  tell' "Linearly independent equations: " i'
+  when (pipes c) (liftIO $ mapM_ print i')
+  when (dumpFile c /= "") (liftIO $ withFile (dumpFile c) WriteMode (\ h -> mapM_ (hPrint h) i'))
+  -- list possible master integrals
+  imaps <- gets integralMaps
+  let nOuterIntegrals = Map.size . fst $ imaps
+      innerIntegralMap = snd imaps
+  let (reducibleIntegrals, irreducibleIntegrals) =
+        Map.partitionWithKey (\ k _ -> let n = fromMaybe (error  "integral not found.") (lookupInPair nOuterIntegrals k imaps)
+                                     in V.elem n j) innerIntegralMap
+  tell' "Integrals that can be reduced with these equations:"
+    (map fst (Map.toList reducibleIntegrals))
+  tell' "Possible Master Integrals:"
+    (map fst (Map.toList irreducibleIntegrals))
+  endTime <- liftIO getCurrentTime
   tell' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
+  when (visualize c) (writeSparsityBMP (inputFile c ++ ".forward.bmp"))
                           
 eqsToRows :: forall s . Reifies s Int => [Equation Int] -> BV.Vector (Row s)
 eqsToRows xs = BV.fromList $ map (V.convert . BV.map (second fromIntegral)) xs
 
-reportResult :: IceMonad ()
-reportResult = do
-  s <- gets system
-  case s of
-    FpSolved image rowNumbers pivotColumnNumbers ->
-      tell' "Linearly independent equations: " rowNumbers
+performBackElim :: IceMonad ()
+performBackElim = do
+  tell "Perform Backwards elimination.\n"
+  forward@(FpSolved p rs _ _) <- gets system
+  nOuter <- liftM (Map.size . fst) $ gets integralMaps
+  let rs' = unwrapBackGauss p $
+             backGauss ([],  map (V.map (second normalise))
+                             ((reverse
+                               . dropWhile ((< nOuter) . fst . V.head)
+                               . reverse) rs))
+  modify (\ x -> x { system = forward {image = rs'} })
+  c <- ask
+  when (visualize c) (writeSparsityBMP (inputFile c ++ ".solved.bmp"))
+  
+ice :: IceMonad ()
+ice = do
+  c <- ask
+  initialiseEquations
+  performElimination
+  when (backsub c) performBackElim
 
 main :: IO ()
 main = do
   c <- cmdArgs config
-  (result, finalState, log) <- runRWST ice c undefined
-  putStrLn log
-  print finalState
-  where
-    ice = do
-      initialiseEquations
-      performElimination
-      reportResult
+  (_, _, messages) <- runRWST ice c undefined
+  lFile <- openFile (logFile c) WriteMode
+  hPutStrLn lFile messages
+  hClose lFile
   
 
 -- ice :: IO (IceState ())
 -- ice = do
 {-
-  lPutStrLn (concat ["Number of integrals within r="
-                    , show (rMax c), ", s=", show (sMax c)
-                    , ": ", show (Map.size innerIntegralMap)])
-  startReductionTime <- getCurrentTime
-  (rs', j, i, p) <- iteratedForwardElim lFile (failBound c) (length invs) nIntegrals ibpRows
-  lPutStr "Number of linearly independent equations: "
-  lPutStrLn $ show (V.length i)
-  let eqList = (if sortList c then sort else id) (V.toList i)
-  lPutStrLn "Indices of linearly independent equations (starting at 0):"
-  mapM_ print eqList
-  mapM_ (lPutStrLn . show) eqList
-  endReductionTime <- getCurrentTime
-  when (visualize c) (writeBMP (inputFile c ++ ".bmp") (sparsityBMP nIntegrals
-        (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) [0..length ibpRows - 1])))
   when (visualize c) (writeBMP (inputFile c ++ ".select.bmp") (sparsityBMP nIntegrals (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
-  when (visualize c) (writeBMP (inputFile c ++ ".forward.bmp") (sparsityBMP nIntegrals (map (V.map fst) rs')))
-  when (dumpFile c /= "") (withFile (dumpFile c) WriteMode (\h -> mapM_ (hPrint h) eqList))
-
-  let (reducibleIntegrals, irreducibleIntegrals) =
-        Map.partitionWithKey (\ k _ -> let n = fromMaybe (error  "integral not found.") (lookupInPair nOuterIntegrals k (outerIntegralMap, innerIntegralMap))
-                                     in V.elem n j) innerIntegralMap
-  lPutStrLn "Integrals that can be reduced with these equations:"
-  mapM_ (lPutStrLn . show . fst) (Map.toList reducibleIntegrals)
-  lPutStrLn "Possible Master Integrals:"
-  mapM_ (lPutStrLn . show . fst) (Map.toList irreducibleIntegrals)
 
   when (backsub c) $ do
     lPutStrLn "Performing backward elimination."
@@ -392,7 +412,8 @@ main = do
                                    ((reverse
                                      . dropWhile ((<nOuterIntegrals) . fst . V.head)
                                      . reverse) rs'))
-    lPutStrLn "Final representations of the integrals will look like:"
+
+lPutStrLn "Final representations of the integrals will look like:"
     mapM_ (lPutStrLn . printRow (outerIntegralMap, innerIntegralMap))  rs''
     when (visualize c) (writeBMP (inputFile c ++ ".solved.bmp") (sparsityBMP nIntegrals (reverse rs'')))
 

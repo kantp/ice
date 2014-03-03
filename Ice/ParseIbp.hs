@@ -85,7 +85,7 @@ collectTerms !nVars !ts =
   let !nTerms = length ts
       !cfs = BV.force $ BV.fromList [ x | (Term x _) <- ts]
       !exps = fromUnboxed (Z :. nTerms :. nVars) (V.concat (map (\ (Term _ x) -> x) ts))
-  in (cfs, exps)
+  in MPoly (cfs, exps)
 
 -- | Parse one line containing one integral and a polynomial that is
 -- the coefficient of this integral in the equation.

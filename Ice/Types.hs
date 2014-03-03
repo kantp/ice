@@ -14,13 +14,10 @@ import           Control.Monad.RWS
 import qualified Data.Array.Repa as R
 import           Data.List (intercalate)
 import qualified Data.Map.Strict as Map
-import           Data.Monoid
 import           Data.Ord
-import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Data.Word (Word8)
-import           Ice.Fp
 import           System.Console.CmdArgs
 
 
@@ -48,16 +45,23 @@ data StateData = StateData { system :: LinSystem
 type IceMonad a = RWST Config String StateData IO a
 
 data LinSystem = PolynomialSystem [Equation MPoly]
-               | FpSystem { p :: Int
+               | FpSystem { prime :: Int
                           , as :: V.Vector Int
                           , mijs :: [Equation Int] }
-               | FpSolved { image :: [(V.Vector (Int, Int))]
-                          , rowNumbers :: V.Vector Int
+               | FpSolved { prime :: Int
+                          , image :: [V.Vector (Int, Int)]
+                          , rowNumbers :: [Int]
                           , pivotColumnNumbers :: V.Vector Int} deriving Show
 
 nEq :: LinSystem -> Int
 nEq (PolynomialSystem xs) = length xs
 nEq (FpSystem _ _ xs) = length xs
+
+sparsityPattern :: LinSystem -> [V.Vector Int]
+sparsityPattern (PolynomialSystem xs) = map (V.convert . BV.map fst) xs
+sparsityPattern (FpSystem _ _ xs) = map (V.convert . BV.map fst) xs
+sparsityPattern (FpSolved _ xs _ _) = map (V.map fst) xs
+
 
 -- | A scalar integral is represented by its indices.
 newtype SInt = SInt (V.Vector Int) deriving Eq
@@ -107,12 +111,12 @@ data IbpLine a = IbpLine !SInt !a deriving (Show, Functor)
 newtype Ibp a = Ibp (BV.Vector (IbpLine a)) deriving (Show, Functor)
 
 -- | A multivariate Polynomial.
-type MPoly = (BV.Vector Integer, R.Array R.U R.DIM2 Word8)
+newtype MPoly = MPoly (BV.Vector Integer, R.Array R.U R.DIM2 Word8) deriving Show
 
 -- | Dummy 'Num' instance for 'MPoly'.  We only need (primitive) addition.
 instance Num MPoly where
-  (+) (!x1,!y1) (!x2,!y2) =
-    ( BV.force $ x1 BV.++ x2, R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
+  (+) (MPoly (!x1,!y1)) (MPoly (!x2,!y2)) =
+    MPoly (BV.force $ x1 BV.++ x2, R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
   (*) =         error "(*) not implemented for multivariate polynomials."
   signum =      error "signum not implemented for multivariate polynomials."
   fromInteger = error "fromInteger not implemented for multivariate polynomials."
