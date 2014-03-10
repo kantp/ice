@@ -240,12 +240,12 @@ withMod' :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int
 withMod' m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
   where symmetricRep' (rs,d,j,i) = (map (V.map (second unFp)) rs,unFp d,j,i)
 
-writeSparsityBMP :: FilePath -> IceMonad ()
-writeSparsityBMP fName = do
+writeSparsityBMP :: Bool -> FilePath -> IceMonad ()
+writeSparsityBMP reverseList fName = do
   pattern <- gets (sparsityPattern . system)
   (m1, m2) <- gets integralMaps
   let n = Map.size m1 + Map.size m2
-  liftIO (writeBMP fName (sparsityBMP n pattern))
+  liftIO (writeBMP fName (sparsityBMP n ((if reverseList then id else reverse) pattern)))
 
 sparsityBMP :: Int -> [V.Vector Int] -> BMP
 sparsityBMP width rs = packRGBA32ToBMP width (length rs) rgba
@@ -332,7 +332,7 @@ initialiseEquations = do
                , show (rMax c), ", s=", show (sMax c)
                , ": ", show nInner])
   tell' "Wall time needed for reading and preparing equations: " (diffUTCTime endTime startTime)
-  when (visualize c) (writeSparsityBMP (inputFile c ++ ".bmp"))
+  when (visualize c) (writeSparsityBMP False (inputFile c ++ ".bmp"))
 
 tell' :: (Show a, MonadWriter String m) => String -> a -> m ()
 tell' x y = tell (x ++ show y ++ "\n")
@@ -346,7 +346,10 @@ performElimination = do
         FpSystem p _ rs -> return $ withMod p $ probeStep ([], buildRowTree (eqsToRows rs)) 1 [] []
         PolynomialSystem _ -> iteratedForwardElim
   let i' = (if sortList c then sort else id) (V.toList i)
-  modify (\x -> x {system = FpSolved p rs' i' j})
+  when (visualize c) (
+    modify (\ x -> x {system = selectRows i' s}) >>
+    writeSparsityBMP False (inputFile c ++ ".select.bmp"))
+  modify (\ x -> x {system = FpSolved p rs' i' j})
   nlieq <- gets (length . rowNumbers . system) -- number of linearly independent equations.
   tell' "Number of linearly independent equations: " nlieq
   tell' "Linearly independent equations: " i'
@@ -365,10 +368,10 @@ performElimination = do
     (map fst (Map.toList irreducibleIntegrals))
   endTime <- liftIO getCurrentTime
   tell' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
-  when (visualize c) (writeSparsityBMP (inputFile c ++ ".forward.bmp"))
+  when (visualize c) (writeSparsityBMP True (inputFile c ++ ".forward.bmp"))
                           
 eqsToRows :: forall s . Reifies s Int => [Equation Int] -> BV.Vector (Row s)
-eqsToRows xs = BV.fromList $ map (V.convert . BV.map (second fromIntegral)) xs
+eqsToRows = BV.fromList . map (V.convert . BV.map (second fromIntegral))
 
 performBackElim :: IceMonad ()
 performBackElim = do
@@ -381,9 +384,22 @@ performBackElim = do
                                . dropWhile ((< nOuter) . fst . V.head)
                                . reverse) rs))
   modify (\ x -> x { system = forward {image = rs'} })
+  s <- get
   c <- ask
-  when (visualize c) (writeSparsityBMP (inputFile c ++ ".solved.bmp"))
-  
+  when (visualize c) (writeSparsityBMP False (inputFile c ++ ".solved.bmp"))
+  tell "Final representations of the integrals will look like:\n"
+  mapM_ (tell . printRow (integralMaps s)) rs'
+  where printRow intmap r =
+          concat [showIntegral intmap (fst . V.head $ r)
+                 , " -> {"
+                 , intercalate ", " (map (showIntegral intmap . fst ) (V.toList $ V.tail r))
+                 , "}\n"]
+        showIntegral intmap n =
+          let elt = fst $ if n < Map.size (fst intmap)
+                          then Map.elemAt n (fst intmap)
+                          else Map.elemAt (n - Map.size (fst intmap)) (snd intmap)
+          in show elt
+
 ice :: IceMonad ()
 ice = do
   c <- ask
@@ -398,40 +414,3 @@ main = do
   lFile <- openFile (logFile c) WriteMode
   hPutStrLn lFile messages
   hClose lFile
-  
-
--- ice :: IO (IceState ())
--- ice = do
-{-
-  when (visualize c) (writeBMP (inputFile c ++ ".select.bmp") (sparsityBMP nIntegrals (map (\ n -> map (V.convert . BV.map fst) ibpRows !! n) (V.toList . V.reverse $ i))))
-
-  when (backsub c) $ do
-    lPutStrLn "Performing backward elimination."
-    let rs'' = unwrapBackGauss p $
-               backGauss ([],  map (V.map (second normalise))
-                                   ((reverse
-                                     . dropWhile ((<nOuterIntegrals) . fst . V.head)
-                                     . reverse) rs'))
-
-lPutStrLn "Final representations of the integrals will look like:"
-    mapM_ (lPutStrLn . printRow (outerIntegralMap, innerIntegralMap))  rs''
-    when (visualize c) (writeBMP (inputFile c ++ ".solved.bmp") (sparsityBMP nIntegrals (reverse rs'')))
-
-  lPutStrLn "Timings (wall time):"
-  lPutStr "Parsing and preparing equations: "
-  lPutStrLn $ show $ diffUTCTime startReductionTime startParseTime
-  lPutStr "Solving Equations: "
-  lPutStrLn $ show $ diffUTCTime endReductionTime startReductionTime
-  hClose lFile
-
-    where printRow intmap r =
-            concat [showIntegral intmap (V.head r)
-                   , " -> {"
-                   , intercalate ", " (map (showIntegral intmap) (V.toList $ V.tail r))
-                   , "}"]
-          showIntegral intmap n =
-            let elt = fst $ if n < Map.size (fst intmap)
-                                      then Map.elemAt n (fst intmap)
-                                      else Map.elemAt (n - Map.size (fst intmap)) (snd intmap)
-            in show elt
--}

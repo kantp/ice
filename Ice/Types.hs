@@ -57,6 +57,14 @@ nEq :: LinSystem -> Int
 nEq (PolynomialSystem xs) = length xs
 nEq (FpSystem _ _ xs) = length xs
 
+-- | Select a subset of rows from a system of equations.
+selectRows :: [Int] -> LinSystem -> LinSystem
+selectRows is (PolynomialSystem xs) = PolynomialSystem (selectRows' is xs)
+selectRows is s@(FpSystem _ _ xs) = s {mijs = selectRows' is xs}
+selectRows is s@(FpSolved _ xs _ _) = s {image = selectRows' is xs}
+selectRows' :: [Int] -> [a] -> [a]
+selectRows' is xs = [xs !! i | i <- is ]
+
 sparsityPattern :: LinSystem -> [V.Vector Int]
 sparsityPattern (PolynomialSystem xs) = map (V.convert . BV.map fst) xs
 sparsityPattern (FpSystem _ _ xs) = map (V.convert . BV.map fst) xs
