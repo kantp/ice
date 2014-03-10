@@ -157,14 +157,14 @@ iteratedForwardElim :: IceMonad (Int, [V.Vector (Int, Int)], Int, V.Vector Int, 
 iteratedForwardElim = do
   PolynomialSystem eqs <- gets system
   goal <- asks failBound
-  (p, xs) <- choosePoints
-  let (!rs',_,!j,!i) = withMod' p $ testMatrixFwd xs eqs
-      r = V.length i
-      bound = getBound r p
+  (p0, xs0) <- choosePoints
+  let (!rs',_,!j,!i) = withMod' p0 $ testMatrixFwd xs0 eqs
+      r0 = V.length i
+      bound0 = getBound r0 p0
       showBound = tell' "The probability that too many equations were discarded is less than "
-  showBound bound
-  if bound < goal
-    then return (p, rs', undefined, j, i)
+  showBound bound0
+  if bound0 < goal
+    then return (p0, rs', undefined, j, i)
     else let redoTest r bound rs = do
                tell "Iterating to decrease probability of failure."
                (p, xs) <- choosePoints
@@ -185,7 +185,7 @@ iteratedForwardElim = do
                  Unlucky -> tell "Unlucky evaluation point, discarding." >>
                    redoTest r bound splitRows
              splitRows = partitionEqs (V.toList i) eqs
-         in redoTest r bound splitRows
+         in redoTest r0 bound0 splitRows
 
 choosePoints :: IceMonad (Int, V.Vector Int)
 choosePoints = do
