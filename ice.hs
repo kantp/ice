@@ -292,9 +292,10 @@ initialiseEquations = do
   c <- ask
   tell' "Configuration: " c
   let
-    parseAction =
-        if pipes c then flip ($) stdin
-        else withFile (inputFile c) ReadMode
+    parseAction p = do
+      eqs <- if pipes c then ($) p stdin
+             else withFile (inputFile c) ReadMode p
+      return $ reverse eqs
     invNames = map B.pack (invariants c)
     integrals eqs = 
         Map.partitionWithKey (\ k _ -> isBeyond c k)
