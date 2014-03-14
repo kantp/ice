@@ -36,6 +36,28 @@ data Config = Config { inputFile :: FilePath
                      , pipes :: Bool
                      } deriving (Show, Data, Typeable)
 
+-- | Default values of configuration.
+config :: Config
+config = Config { inputFile = def &= args &= typ "FILE"
+                , dumpFile = def &= name "d" &= typFile &= help "In addition to the output on stdout, print a list of newline-separated equation numbers to FILE.  Note that the equations are zero-indexed."
+                , logFile = "ice.log" &= name "l" &= help "Path to the logfile."
+                , intName = "Int" &= help "This is used to control the name of the function representing integrals in the input file.  The default is Int."
+                , invariants = def &= name "i" &= help "Add the symbol ITEM to the list of variables that appear in the polynomials."
+                , sortList = False &= help "Sort the list of linearly independent equations.  Otherwise, prints a permutation that brings the matrix as close to upper triangular form as possible."
+                , backsub = False &= help "After forward elimination, perform backward elimination in order to determine which master integrals appear in the result for each integral."
+                , rMax = def &= name "r" &= help "Maximal number of dots expected to be reduced."
+                , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."
+                , visualize = False &= help "Draw images of the sparsity pattern of original, reduced, and solved matrices."
+                , failBound = 1 &= help "Repeat forward elimination to decrease probability of failure below this."
+                , pipes = False &= name "p" &= help "use stdin and stdout for communication instead of files."}
+         &= summary "ICE -- Integration-By-Parts Chooser of Equations"
+         &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
+                    , "a maximal linearly independent subset."]
+         &= program "ice"
+
+
+-- | State of the computation: the linear system, the sorted
+-- integrals, and number of integrals.
 data StateData = StateData { system :: LinSystem
                            , integralMaps :: (Map.Map SInt (), Map.Map SInt ())
                            , nIntegrals :: Int
@@ -44,6 +66,9 @@ data StateData = StateData { system :: LinSystem
 -- | State Monad of Ice.
 type IceMonad a = RWST Config String StateData IO a
 
+-- | A linear system can either be a system with polynomial entries,
+-- an image under evaluation modulo a prime, or a solution of an
+-- image.
 data LinSystem = PolynomialSystem [Equation MPoly]
                | FpSystem { prime :: Int
                           , as :: V.Vector Int
@@ -53,6 +78,7 @@ data LinSystem = PolynomialSystem [Equation MPoly]
                           , rowNumbers :: [Int]
                           , pivotColumnNumbers :: V.Vector Int} deriving Show
 
+-- | Count the number of equations in a linear system.
 nEq :: LinSystem -> Int
 nEq (PolynomialSystem xs) = length xs
 nEq (FpSystem _ _ xs) = length xs
@@ -65,6 +91,9 @@ selectRows is s@(FpSolved _ xs _ _) = s {image = selectRows' is xs}
 selectRows' :: [Int] -> [a] -> [a]
 selectRows' is xs = [xs !! i | i <- is ]
 
+-- | The sparsity pattern of a linear system contains a list of
+-- vectors.  Each vector represents one row, and each entry marks a
+-- non-zero entry in that row.
 sparsityPattern :: LinSystem -> [V.Vector Int]
 sparsityPattern (PolynomialSystem xs) = map (V.convert . BV.map fst) xs
 sparsityPattern (FpSystem _ _ xs) = map (V.convert . BV.map fst) xs
@@ -112,9 +141,6 @@ isBeyond c (SInt xs) = r > rMax c || s > sMax c
 data Term = Term !Integer !(V.Vector Word8) deriving Show
 -- | One term in an IBP equation.
 data IbpLine a = IbpLine !SInt !a deriving (Show, Functor)
--- data IbpLine = IbpLine { ibpIntegral :: !SInt
---                        , ibpCfs :: !(BV.Vector Integer)
---                        , ibpExps :: !(R.Array R.U R.DIM2 Word8) } deriving Show
 -- | An IBP equation.
 newtype Ibp a = Ibp (BV.Vector (IbpLine a)) deriving (Show, Functor)
 

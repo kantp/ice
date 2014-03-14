@@ -60,6 +60,7 @@ getBound r p = 1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..r]]
 refill :: Handle -> IO B.ByteString
 refill h = B.hGet h (4*1024)
 
+-- | Read equations from the handle until exhausted.
 readEquations :: Parser (Ibp a) -> Handle -> IO [Ibp a]
 readEquations parser h = go (0 :: Int) [] =<< refill h
   where
@@ -77,9 +78,13 @@ readEquations parser h = go (0 :: Int) [] =<< refill h
               else go (n+1) (x:acc) s
           | otherwise -> go (n+1) (x:acc) bs
 
+-- | Determine which integrals appear in a certain equation.
 getIntegrals :: Ibp a -> BV.Vector SInt
 getIntegrals (Ibp xs) = BV.map (\ (IbpLine x _) -> x) xs
 
+-- | Transform an equation that is stored as tuples (integral,
+-- coefficient) into a sparse matrix row containing entries
+-- (#(integral), coefficient).
 ibpToRow :: Num a => (Map.Map SInt (), Map.Map SInt ()) -> Ibp a -> Equation a
 ibpToRow table (Ibp x) =
   let
@@ -92,17 +97,24 @@ ibpToRow table (Ibp x) =
              x
   in BV.fromList . IntMap.toList $ rowmap
 
+-- | We keep two sets of integrals.  The first one contains integrals
+-- on the boundary that we do not hope to solve without additional
+-- equations, the second contains the rest.  We number the whole set
+-- of integrals, starting with the integrals at the border.  This
+-- function retrieves gets the number of an integral.
 lookupInPair :: Ord k => Int -> k -> (Map.Map k (), Map.Map k ()) -> Maybe Int
 lookupInPair offset k (m1, m2) =
   case Map.lookupIndex k m1 of
     Nothing -> liftM (+ offset) (Map.lookupIndex k m2)
     x -> x
 
+-- | Inject a concrete value for the prime number used as modulus in backwards elimination.
 unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector (Int, Fp s Int)])) -> [V.Vector (Int, Int)]
 unwrapBackGauss p rs =
   let (_, res) =  reify p (\ (_ :: Proxy s) -> (unFp *** map (V.map (second unFp))) (rs :: (Fp s Int, [V.Vector (Int, Fp s Int)])))
   in res
 
+-- | Backwards Gaussian elimination.
 backGauss :: forall s . Reifies s Int
              => ([V.Vector (Int, Fp s Int)], [Row s])
              -> (Fp s Int, [V.Vector (Int, Fp s Int)])
@@ -125,6 +137,7 @@ partitionEqs is rs = first reverse . (map snd *** map snd) $ foldl' step ([], rs
     step (indep, dep) i = (eq:indep, dep')
       where ([eq], dep') = partition ((==i) . fst) dep
 
+-- | This is one step in the forward elimination.
 probeStep :: forall s . Reifies s Int
              => ([Row s], RowTree s)
              -> Fp s Int
@@ -153,6 +166,9 @@ probeStep (!rsDone, !rs) !d !j !i
     rsDone' = snd normalisedPivotRow:rsDone
     p = getModulus d
 
+-- | This function solves multiple images of the original system, in
+-- order to reduce the bound on the probability of failure below the
+-- value specified by the --failbound option.
 iteratedForwardElim :: IceMonad (Int, [V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
 iteratedForwardElim = do
   PolynomialSystem eqs <- gets system
@@ -187,6 +203,7 @@ iteratedForwardElim = do
              splitRows = partitionEqs (V.toList i) eqs
          in redoTest r0 bound0 splitRows
 
+-- | Choose a large prime and an evaluation point randomly.
 choosePoints :: IceMonad (Int, V.Vector Int)
 choosePoints = do
   nInvs <- asks (length . invariants)
@@ -196,6 +213,7 @@ choosePoints = do
   tell' "Random points: " (V.toList xs)
   return (p, xs)
 
+-- | Evaluate the polynomials in the IBP equations.
 evalIbps :: forall s . Reifies s Int
             => Array U DIM1 (Fp s Int)
             -> [Equation MPoly]
@@ -205,7 +223,12 @@ evalIbps xs rs = BV.fromList (map treatRow rs)  where
   toPoly (MPoly (cs, es)) = Poly (R.fromUnboxed (Z :. BV.length cs) $ (V.convert . BV.map fromInteger) cs) es
   treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
 
--- | Equations are ordered with the following priority:
+-- | During forward elimination, we keep the equations in a sorted
+-- tree.  This has the advantage that it is easy to find the next
+-- pivot row, find all rows that will be modified in the next step,
+-- and reinsert the modified equations.
+--   
+-- Equations are ordered with the following priority:
 --
 -- - column index of first non-zero entry
 -- - number of times this equations has been modified
@@ -221,6 +244,7 @@ updateRowTree f rs =
   Map.fromList . Map.elems . Map.filter (not . V.null . snd)  $
   Map.mapWithKey (\ (_, n, t, i) r -> let r' = f r in ((fst (V.head r'), n+1, t, i), r')) rs
 
+-- | Perform a forward elimination.
 testMatrixFwd :: forall s . Reifies s Int
                  => V.Vector Int
                  -> [Equation MPoly]
@@ -230,6 +254,7 @@ testMatrixFwd xs rs = (rs',d,j,i) where
   m = evalIbps xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
             
+-- | Inject modulus to be used in the forward elimination.
 withMod :: Int -> (forall s . Reifies s Int => (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))
            -> (Int, [V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
 withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))))
@@ -240,6 +265,7 @@ withMod' :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int
 withMod' m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
   where symmetricRep' (rs,d,j,i) = (map (V.map (second unFp)) rs,unFp d,j,i)
 
+-- | Produce a bitmap that visualises how sparse a matrix is.
 writeSparsityBMP :: Bool -> FilePath -> IceMonad ()
 writeSparsityBMP reverseList fName = do
   pattern <- gets (sparsityPattern . system)
@@ -259,24 +285,6 @@ sparsityBMP width rs = packRGBA32ToBMP width (length rs) rgba
       | null r = Just (white, (i+1, r))
       | head r == i = Just (black, (i+1, tail r))
       | otherwise = Just (white, (i+1, r))
-
-config :: Config
-config = Config { inputFile = def &= args &= typ "FILE"
-                , dumpFile = def &= name "d" &= typFile &= help "In addition to the output on stdout, print a list of newline-separated equation numbers to FILE.  Note that the equations are zero-indexed."
-                , logFile = "ice.log" &= name "l" &= help "Path to the logfile."
-                , intName = "Int" &= help "This is used to control the name of the function representing integrals in the input file.  The default is Int."
-                , invariants = def &= name "i" &= help "Add the symbol ITEM to the list of variables that appear in the polynomials."
-                , sortList = False &= help "Sort the list of linearly independent equations.  Otherwise, prints a permutation that brings the matrix as close to upper triangular form as possible."
-                , backsub = False &= help "After forward elimination, perform backward elimination in order to determine which master integrals appear in the result for each integral."
-                , rMax = def &= name "r" &= help "Maximal number of dots expected to be reduced."
-                , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."
-                , visualize = False &= help "Draw images of the sparsity pattern of original, reduced, and solved matrices."
-                , failBound = 1 &= help "Repeat forward elimination to decrease probability of failure below this."
-                , pipes = False &= name "p" &= help "use stdin and stdout for communication instead of files."}
-         &= summary "ICE -- Integration-By-Parts Chooser of Equations"
-         &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
-                    , "a maximal linearly independent subset."]
-         &= program "ice"
 
 -- | Read a system of equations.
 --

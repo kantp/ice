@@ -3,6 +3,10 @@
 {-# LANGUAGE BangPatterns #-}
 
 -- | Attoparsec-based parser for integration-by-parts equations.
+--
+-- We can either parse polynomials to a sparse representation, or
+-- evaluate them on the fly.  The latter is done unless multiple
+-- evaluations are needed, in order to save memory.
 module Ice.ParseIbp
        (ibp, evaldIbp)
        where
