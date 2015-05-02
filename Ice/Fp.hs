@@ -1,101 +1,91 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 -- | F_p, the field of integers modulo the prime p.
 module Ice.Fp
-  ( Fp ()
-  , unFp, symmetricRep
-  , getModulus
-  , normalise
+  ( Fp, Modulus
+  , (+%), (-%), (*%), (/%), (^%), negateMod
+  , normalise, modInv
   , Row, multRow, addRows
   , Poly (..), multiEval, multiEvalBulk
   )  where
 
-import           Control.Arrow (second)
-import           Data.Array.Repa as R
-import           Data.Array.Repa.Eval (Elt)
-import           Data.Proxy
-import           Data.Reflection
-import qualified Data.Vector as BV
+import           Control.Arrow               (second)
+import           Data.Array.Repa             as R
+import           Data.Array.Repa.Eval        (Elt)
+import           Data.Int                    (Int64)
+import           Data.List                   (foldl')
+import qualified Data.Vector                 as BV
 import           Data.Vector.Generic.Base
 import           Data.Vector.Generic.Mutable
-import qualified Data.Vector.Unboxed as V
-import           Data.Word (Word8)
+import qualified Data.Vector.Unboxed         as V
+import           Data.Word                   (Word8)
 
--- | Use the reflection package to implement modular arithmetic.  The
---   type @s@ keeps track of the modulus, while @a@ is the actual
---   datatype we want to perform arithmetic with.
-newtype Fp s a = Fp a deriving (Show, Eq, Ord)
+type Fp = Int
+type Modulus = Int
 
-deriving instance (Vector V.Vector a) => Vector V.Vector (Fp s a)
-deriving instance (MVector V.MVector a) => MVector V.MVector (Fp s a)
-deriving instance (V.Unbox a) => V.Unbox (Fp s a)
-deriving instance (Elt a) => Elt (Fp s a)
+takeRem :: Modulus -> Int -> Fp
+{-# INLINE takeRem #-}
+takeRem m x = x `rem` m
 
--- | unwrap data from the 'Fp' wrapper.
-unFp :: Fp s a -> a
-{-# INLINE unFp #-}
-unFp (Fp a) = a
+(+%) :: Modulus -> Fp -> Fp -> Fp
+{-# INLINE (+%) #-}
+(+%) m x y = takeRem m $ x + y
+
+(-%) :: Modulus -> Fp -> Fp -> Fp
+{-# INLINE (-%) #-}
+(-%) m x y = takeRem m $ x - y
+
+(*%) :: Modulus -> Fp -> Fp -> Fp
+{-# INLINE (*%) #-}
+(*%) m x y = takeRem m $ x * y
+
+(/%) :: Modulus -> Fp -> Fp -> Fp
+{-# INLINE (/%) #-}
+(/%) m x y = (*%) m x $ modInv m y
+
+(^%) :: Modulus -> Fp -> Word8 -> Fp
+{-# INLINE (^%) #-}
+(^%) m x n = foldl' ((*%) m) 1 $ Prelude.replicate (fromIntegral n) x
+
+negateMod :: Modulus -> Fp -> Fp
+{-# INLINE negateMod #-}
+negateMod m x = normalise m (-x)
 
 -- | Return the symmetric representation of a modular number.
-symmetricRep :: (Reifies s a, Integral a) => Fp s a -> a
-symmetricRep x
-  | x' > halfModulus = x' - modulus
-  | x' < - halfModulus = x' + modulus
-  | otherwise = x'
-  where modulus = getModulus x
-        halfModulus = modulus `div` 2
-        x' = unFp x
+symmetricRep :: Modulus -> Fp -> Int
+symmetricRep m x
+  | x > halfModulus = x - m
+  | x < - halfModulus = x + m
+  | otherwise = x
+  where halfModulus = m `div` 2
 
 -- | Inject a value into a modular computation.
-normalise :: forall s a . (Reifies s a, Integral a) => a -> Fp s a
+normalise :: Modulus -> Int -> Fp
 {-# INLINE normalise #-}
-normalise !a = Fp (a `mod` reflect (undefined :: Proxy s))
-
-takeRem :: forall s a . (Reifies s a, Integral a) => a -> Fp s a
-{-# INLINE takeRem #-}
-takeRem !a = Fp (a `rem` reflect (undefined :: Proxy s))
-
--- | Determine the modulus used in a calculation.
-getModulus :: forall s a . (Reifies s a) => Fp s a -> a
-getModulus _ = reflect (undefined :: Proxy s)
-
-instance (Reifies s a, Integral a) => Num (Fp s a) where
-  {-# SPECIALIZE instance (Reifies s Int) => Num (Fp s Int) #-}
-  Fp a + Fp b = takeRem (a + b)
-  Fp a * Fp b = takeRem (a * b)
-  negate (Fp a) = normalise (negate a)
-  fromInteger 0 = Fp 0
-  fromInteger 1 = Fp 1
-  fromInteger a = Fp (fromInteger $ a `mod` fromIntegral (reflect (undefined :: Proxy s)))
-  signum = error "signum in finite field"
-  abs = error "abs in finite field"
-
-instance (Reifies s a, Integral a) => Fractional (Fp s a) where
-  {-# SPECIALIZE instance (Reifies s Int) => Fractional (Fp s Int) #-}
-  recip = modInv
-  fromRational = error "trying to convert rational to F_p"
+normalise m x = x `mod` m
 
 -- | Modular inverse.
-modInv :: (Reifies s t, Integral t) => Fp s t -> Fp s t
-modInv x = let (_, inverse, _) = eea (unFp x) (getModulus x)
-           in normalise inverse
+modInv :: Modulus -> Fp -> Fp
+modInv m x = let (_, inverse, _) = eea x m
+             in normalise m inverse
 
 -- | Sparse row of a matrix.  First entry of any pair is the column
 -- index, snd entry the value.
-type Row s = V.Vector (Int, Fp s Int)
+type Row = V.Vector (Int, Fp)
 
 {-# INLINE multRow #-}
-multRow 0 _ = V.empty
-multRow !x !row = V.map (second (*x)) row
+multRow :: Modulus -> Fp -> Row -> Row
+multRow _ 0 _ = V.empty
+multRow p !x !row = V.map (second ((*%) p x)) row
 
 {-# INLINE addRows #-}
-addRows !r1 !r2 = V.unfoldr step (r1, r2) where
+addRows p !r1 !r2 = V.unfoldr step (r1, r2) where
   step (x, y)
     | V.null x && V.null y = Nothing
     | V.null x = Just (V.head y, (x, V.tail y))
@@ -106,39 +96,41 @@ addRows !r1 !r2 = V.unfoldr step (r1, r2) where
       in case compare xi yi of
         LT -> Just ((xi, xval), (V.tail x, y))
         GT -> Just ((yi, yval), (x, V.tail y))
-        EQ -> case xval + yval of
+        EQ -> case (+%) p xval yval of
           0 -> step (V.tail x, V.tail y)
           val -> Just ((xi, val), (V.tail x, V.tail y))
 
-data Poly s = Poly { cfs :: !(Array U DIM1 (Fp s Int))
-                   , exps :: !(Array U DIM2 Word8) -- ^ exps[(term :. variable)]=exponent
-                   } deriving (Eq, Show)
+data Poly = Poly { cfs  :: !(Array U DIM1 Fp)
+                 , exps :: !(Array U DIM2 Word8) -- ^ exps[(term :. variable)]=exponent
+                 } deriving (Eq, Show)
 
 -- | Evaluation of a multivariate polynomial.
-multiEval :: forall s . Reifies s Int
-  => Array U DIM1 (Fp s Int)
-  -> Poly s
-  -> Fp s Int
-multiEval !xs !p =
+multiEval
+  :: Modulus
+  -> Array U DIM1 Fp
+  -> Poly
+  -> Fp
+multiEval m !xs !p =
   let (i:._) = extent (exps p)
       xs' = extend (i:.All) xs
-      powers = R.zipWith (^) xs' (exps p)
-      monomials = R.foldS (*) 1 powers
-      terms = R.zipWith (*) (cfs p) monomials
-  in foldAllS (+) 0 terms
+      powers = R.zipWith ((^%) m) xs' (exps p)
+      monomials = R.foldS ((*%) m) 1 powers
+      terms = R.zipWith ((*%) m) (cfs p) monomials
+  in foldAllS ((+%) m) 0 terms
 
 -- | Evaluate many polynomials simultaneously, calculating the powers only once.
-multiEvalBulk :: forall s . Reifies s Int
-  => Array U DIM1 (Fp s Int)
-  -> BV.Vector (Poly s)
-  -> V.Vector (Fp s Int)
-multiEvalBulk !xs !ps = V.convert (BV.map evalPoly ps)
+multiEvalBulk
+  :: Modulus
+  -> Array U DIM1 Fp
+  -> BV.Vector Poly
+  -> V.Vector Fp
+multiEvalBulk m !xs !ps = V.convert (BV.map evalPoly ps)
   where
-    evalPoly :: Poly s -> Fp s Int
-    evalPoly p = let monomials = R.foldS (*) 1 (evalTerms (delay $ exps p))
-                     terms = R.zipWith (*) (cfs p) monomials
-                 in foldAllS (+) 0 terms
-    evalTerms :: Array R.D DIM2 Word8 -> Array R.D DIM2 (Fp s Int)
+    evalPoly :: Poly -> Fp
+    evalPoly p = let monomials = R.foldS ((*%) m) 1 (evalTerms (delay $ exps p))
+                     terms = R.zipWith ((*%) m) (cfs p) monomials
+                 in foldAllS ((+%) m) 0 terms
+    evalTerms :: Array R.D DIM2 Word8 -> Array R.D DIM2 Fp
     evalTerms ts = R.traverse ts id (\ getElt ix@(Z:._:.i :: DIM2) -> (powers BV.! i) V.! fromIntegral (getElt ix))
     powers = BV.zipWith generatePowers
              (BV.convert (R.toUnboxed (maxPowers (concatTerms (BV.map (R.delay . exps) ps)))))
@@ -147,8 +139,8 @@ multiEvalBulk !xs !ps = V.convert (BV.map evalPoly ps)
     maxPowers = R.foldS max 0 . R.transpose
     concatTerms :: BV.Vector (Array R.D DIM2 Word8) -> Array R.D DIM2 Word8
     concatTerms =  R.transpose . BV.foldl1' R.append . BV.map R.transpose -- (R.append . R.transpose)
-    generatePowers :: Word8 -> Fp s Int -> V.Vector (Fp s Int)
-    generatePowers n x = V.iterateN (fromIntegral n+1) (*x) 1
+    generatePowers :: Word8 -> Fp -> V.Vector Fp
+    generatePowers n x = V.iterateN (fromIntegral n+1) ((*%) m x) 1
 
 -- | Extended Euklid's Algorithm
 eea :: (Integral a) => a -> a -> (a,a,a)
