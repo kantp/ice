@@ -14,7 +14,7 @@ import           Control.Monad.Random
 import           Control.Monad.RWS
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map, (++))
-import           Data.Attoparsec
+import           Data.Attoparsec.ByteString
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.IntMap.Strict as IntMap

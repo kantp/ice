@@ -12,7 +12,6 @@ where
 
 import           Control.Monad.RWS
 import qualified Data.Array.Repa        as R
-import           Data.Int               (Int64)
 import           Data.List              (intercalate)
 import qualified Data.Map.Strict        as Map
 import           Data.Ord

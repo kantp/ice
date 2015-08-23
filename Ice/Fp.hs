@@ -13,16 +13,12 @@ module Ice.Fp
   , Poly (..), multiEval, multiEvalBulk
   )  where
 
-import           Control.Arrow               (second)
-import           Data.Array.Repa             as R
-import           Data.Array.Repa.Eval        (Elt)
-import           Data.Int                    (Int64)
-import           Data.List                   (foldl')
-import qualified Data.Vector                 as BV
-import           Data.Vector.Generic.Base
-import           Data.Vector.Generic.Mutable
-import qualified Data.Vector.Unboxed         as V
-import           Data.Word                   (Word8)
+import           Control.Arrow       (second)
+import           Data.Array.Repa     as R
+import           Data.List           (foldl')
+import qualified Data.Vector         as BV
+import qualified Data.Vector.Unboxed as V
+import           Data.Word           (Word8)
 
 type Fp = Int
 type Modulus = Int
