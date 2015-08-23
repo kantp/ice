@@ -113,11 +113,11 @@ instance Ord SInt where
     laportaOrdering :: V.Vector Int -> V.Vector Int -> Ordering
     laportaOrdering =
       comparing (V.length . V.filter (>0)) -- number of propagators.
-      `mappend` comparing (numDots . SInt) -- total number of dots.
-      `mappend` comparing (numSPs . SInt) -- total number of scalar products.
-      `mappend` compareMissingProps -- comapre which propagators are present/absent.
-      `mappend` comparePropPowers -- compare powers of individual propagators.
-      `mappend` compareSpPowers -- compare powers of individual scalar products.
+      <> comparing (numDots . SInt) -- total number of dots.
+      <> comparing (numSPs . SInt) -- total number of scalar products.
+      <> compareMissingProps -- comapre which propagators are present/absent.
+      <> comparePropPowers -- compare powers of individual propagators.
+      <> compareSpPowers -- compare powers of individual scalar products.
     compareMissingProps xs ys = mconcat (zipWith (\ a b -> compare (signum (max a 0)) (signum (max b 0))) (V.toList ys) (V.toList xs))
     comparePropPowers xs ys = mconcat (zipWith (\ a b -> compare (max a 0) (max b 0)) (V.toList xs) (V.toList ys))
     compareSpPowers xs ys = mconcat (zipWith (\ a b -> compare (max (- a) 0) (max (- b) 0)) (V.toList xs) (V.toList ys))

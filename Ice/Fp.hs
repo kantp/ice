@@ -1,11 +1,9 @@
-{-# LANGUAGE BangPatterns               #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE RankNTypes                 #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE BangPatterns          #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 -- | F_p, the field of integers modulo the prime p.
 module Ice.Fp
   ( Fp, Modulus
@@ -146,7 +144,7 @@ multiEvalBulk m !xs !ps = V.convert (BV.map evalPoly ps)
 eea :: (Integral a) => a -> a -> (a,a,a)
 {-# INLINE eea #-}
 eea !a !b = eea' (abs a) (abs b) 1 0 0 1 where
-  eea' !c !0 !c1 !_ !c2 !_ = ( abs c
+  eea' !c 0 !c1 !_ !c2 !_ = ( abs c
                        , c1 `div` (signum a*signum c)
                        , c2 `div` (signum b*signum c) )
   eea' !c !d !c1 !d1 !c2 !d2 =

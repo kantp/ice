@@ -100,7 +100,7 @@ ibpLine intName xs = do
   skipSpace
   char '('
   skipSpace
-  poly <- manyTill' (term xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
+  poly <- manyTill' (term xs) (skipSpace >> char ')' >> endOfLine)
   let poly' = collectTerms (length xs) poly
   return $ IbpLine (SInt inds) poly'
 
@@ -112,7 +112,7 @@ evaldIbpLine intName m xs = do
   skipSpace
   char '('
   skipSpace
-  poly <- manyTill' (evaldTerm m xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
+  poly <- manyTill' (evaldTerm m xs) (skipSpace >> char ')' >> endOfLine)
   let poly' = foldl' (+) 0 poly
   return $ IbpLine (SInt inds) poly'
 
