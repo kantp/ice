@@ -12,7 +12,6 @@ where
 
 import           Control.Monad.RWS
 import qualified Data.Array.Repa        as R
-import           Data.Int               (Int64)
 import           Data.List              (intercalate)
 import qualified Data.Map.Strict        as Map
 import           Data.Ord
@@ -83,6 +82,7 @@ data LinSystem = PolynomialSystem [Equation MPoly]
 nEq :: LinSystem -> Int
 nEq (PolynomialSystem xs) = length xs
 nEq (FpSystem _ _ xs) = length xs
+nEq (FpSolved _ _ _ xs) = V.length xs
 
 -- | Select a subset of rows from a system of equations.
 selectRows :: [Int] -> LinSystem -> LinSystem
@@ -113,11 +113,11 @@ instance Ord SInt where
     laportaOrdering :: V.Vector Int -> V.Vector Int -> Ordering
     laportaOrdering =
       comparing (V.length . V.filter (>0)) -- number of propagators.
-      `mappend` comparing (numDots . SInt) -- total number of dots.
-      `mappend` comparing (numSPs . SInt) -- total number of scalar products.
-      `mappend` compareMissingProps -- comapre which propagators are present/absent.
-      `mappend` comparePropPowers -- compare powers of individual propagators.
-      `mappend` compareSpPowers -- compare powers of individual scalar products.
+      <> comparing (numDots . SInt) -- total number of dots.
+      <> comparing (numSPs . SInt) -- total number of scalar products.
+      <> compareMissingProps -- comapre which propagators are present/absent.
+      <> comparePropPowers -- compare powers of individual propagators.
+      <> compareSpPowers -- compare powers of individual scalar products.
     compareMissingProps xs ys = mconcat (zipWith (\ a b -> compare (signum (max a 0)) (signum (max b 0))) (V.toList ys) (V.toList xs))
     comparePropPowers xs ys = mconcat (zipWith (\ a b -> compare (max a 0) (max b 0)) (V.toList xs) (V.toList ys))
     compareSpPowers xs ys = mconcat (zipWith (\ a b -> compare (max (- a) 0) (max (- b) 0)) (V.toList xs) (V.toList ys))
@@ -156,6 +156,8 @@ instance Num MPoly where
   signum =      error "signum not implemented for multivariate polynomials."
   fromInteger = error "fromInteger not implemented for multivariate polynomials."
   abs =         error "abs not implemented for multivariate polynomials."
+  negate =      error "negate not implemented for multivariate polynomials."
+
 
 type Equation a = BV.Vector (Int, a)
 

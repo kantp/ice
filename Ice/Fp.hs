@@ -1,11 +1,9 @@
-{-# LANGUAGE BangPatterns               #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE RankNTypes                 #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE BangPatterns          #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 -- | F_p, the field of integers modulo the prime p.
 module Ice.Fp
   ( Fp, Modulus
@@ -15,16 +13,12 @@ module Ice.Fp
   , Poly (..), multiEval, multiEvalBulk
   )  where
 
-import           Control.Arrow               (second)
-import           Data.Array.Repa             as R
-import           Data.Array.Repa.Eval        (Elt)
-import           Data.Int                    (Int64)
-import           Data.List                   (foldl')
-import qualified Data.Vector                 as BV
-import           Data.Vector.Generic.Base
-import           Data.Vector.Generic.Mutable
-import qualified Data.Vector.Unboxed         as V
-import           Data.Word                   (Word8)
+import           Control.Arrow       (second)
+import           Data.Array.Repa     as R
+import           Data.List           (foldl')
+import qualified Data.Vector         as BV
+import qualified Data.Vector.Unboxed as V
+import           Data.Word           (Word8)
 
 type Fp = Int
 type Modulus = Int
@@ -57,14 +51,6 @@ negateMod :: Modulus -> Fp -> Fp
 {-# INLINE negateMod #-}
 negateMod m x = normalise m (-x)
 
--- | Return the symmetric representation of a modular number.
-symmetricRep :: Modulus -> Fp -> Int
-symmetricRep m x
-  | x > halfModulus = x - m
-  | x < - halfModulus = x + m
-  | otherwise = x
-  where halfModulus = m `div` 2
-
 -- | Inject a value into a modular computation.
 normalise :: Modulus -> Int -> Fp
 {-# INLINE normalise #-}
@@ -85,6 +71,7 @@ multRow _ 0 _ = V.empty
 multRow p !x !row = V.map (second ((*%) p x)) row
 
 {-# INLINE addRows #-}
+addRows :: Modulus -> V.Vector (Int, Fp) -> V.Vector (Int, Fp) -> V.Vector (Int, Fp)
 addRows p !r1 !r2 = V.unfoldr step (r1, r2) where
   step (x, y)
     | V.null x && V.null y = Nothing
@@ -146,7 +133,7 @@ multiEvalBulk m !xs !ps = V.convert (BV.map evalPoly ps)
 eea :: (Integral a) => a -> a -> (a,a,a)
 {-# INLINE eea #-}
 eea !a !b = eea' (abs a) (abs b) 1 0 0 1 where
-  eea' !c !0 !c1 !_ !c2 !_ = ( abs c
+  eea' !c 0 !c1 !_ !c2 !_ = ( abs c
                        , c1 `div` (signum a*signum c)
                        , c2 `div` (signum b*signum c) )
   eea' !c !d !c1 !d1 !c2 !d2 =
