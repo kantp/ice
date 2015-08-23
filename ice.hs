@@ -21,8 +21,6 @@ import qualified Data.IntMap.Strict as IntMap
 import           Data.List
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
-import           Data.Proxy
-import           Data.Reflection
 import           Data.Time
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
@@ -85,14 +83,14 @@ getIntegrals (Ibp xs) = BV.map (\ (IbpLine x _) -> x) xs
 -- | Transform an equation that is stored as tuples (integral,
 -- coefficient) into a sparse matrix row containing entries
 -- (#(integral), coefficient).
-ibpToRow :: Num a => (Map.Map SInt (), Map.Map SInt ()) -> Ibp a -> Equation a
-ibpToRow table (Ibp x) =
+ibpToRow :: (a -> a -> a) -> (Map.Map SInt (), Map.Map SInt ()) -> Ibp a -> Equation a
+ibpToRow combine table (Ibp x) =
   let
     offset = Map.size . fst $ table
     col (IbpLine i _) = fromMaybe (error "integral not found.") (lookupInPair offset i table)
     term (IbpLine _ t) = t
     rowmap = BV.foldl'
-             (\ m line -> IntMap.insertWith (+) (col line) (term line) m)
+             (\ m line -> IntMap.insertWith combine (col line) (term line) m)
              IntMap.empty
              x
   in BV.fromList . IntMap.toList $ rowmap
@@ -101,31 +99,25 @@ ibpToRow table (Ibp x) =
 -- on the boundary that we do not hope to solve without additional
 -- equations, the second contains the rest.  We number the whole set
 -- of integrals, starting with the integrals at the border.  This
--- function retrieves gets the number of an integral.
+-- function gets the number of an integral.
 lookupInPair :: Ord k => Int -> k -> (Map.Map k (), Map.Map k ()) -> Maybe Int
 lookupInPair offset k (m1, m2) =
   case Map.lookupIndex k m1 of
     Nothing -> liftM (+ offset) (Map.lookupIndex k m2)
     x -> x
 
--- | Inject a concrete value for the prime number used as modulus in backwards elimination.
-unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector (Int, Fp s Int)])) -> [V.Vector (Int, Int)]
-unwrapBackGauss p rs =
-  let (_, res) =  reify p (\ (_ :: Proxy s) -> (unFp *** map (V.map (second unFp))) (rs :: (Fp s Int, [V.Vector (Int, Fp s Int)])))
-  in res
-
 -- | Backwards Gaussian elimination.
-backGauss :: forall s . Reifies s Int
-             => ([V.Vector (Int, Fp s Int)], [Row s])
-             -> (Fp s Int, [V.Vector (Int, Fp s Int)])
-backGauss (!rsDone, []) = (1, rsDone)
-backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (pivotRow:rsDone, rs')
+backGauss :: Modulus
+             -> ([V.Vector (Int, Fp)], [Row])
+             -> ([V.Vector (Int, Fp)])
+backGauss _ (!rsDone, []) = (rsDone)
+backGauss m (!rsDone, !pivotRow:(!rs)) = backGauss m (pivotRow:rsDone, rs')
   where
-    (pivotColumn, invPivot) = second recip (V.head pivotRow)
+    (pivotColumn, invPivot) = second (modInv m) (V.head pivotRow)
     rs' = map pivotOperation rs
     pivotOperation row = case V.find ((==pivotColumn) . fst) row of
       Nothing -> row
-      Just (_, elt) -> addRows (multRow (-elt*invPivot) pivotRow) row
+      Just (_, elt) -> addRows m (multRow m (negateMod m $ (*%) m elt invPivot) pivotRow) row
       
 -- | split equations into linearly independent and linealy dependent
 -- ones (given the list i of linearly independent equations),
@@ -138,33 +130,32 @@ partitionEqs is rs = first reverse . (map snd *** map snd) $ foldl' step ([], rs
       where ([eq], dep') = partition ((==i) . fst) dep
 
 -- | This is one step in the forward elimination.
-probeStep :: forall s . Reifies s Int
-             => ([Row s], RowTree s)
-             -> Fp s Int
+probeStep :: Modulus
+             -> ([Row], RowTree)
+             -> Fp
              -> [Int]
              -> [Int]
-             -> (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int)
-probeStep (!rsDone, !rs) !d !j !i
-  | Map.null rs = (p,rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+             -> (Int, [Row], Fp, V.Vector Int, V.Vector Int)
+probeStep m (!rsDone, !rs) !d !j !i
+  | Map.null rs = (m, rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
   | otherwise =
-    probeStep (rsDone', rows') d' j' i'
+    probeStep m (rsDone', rows') d' j' i'
   where
     (pivotRow, otherRows) = Map.deleteFindMin rs
     (_,_,_,pivotRowNumber) = fst pivotRow
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
     (rowsToModify, ignoreRows) = Map.split (pivotColumn+1, 0, 0, 0) otherRows
-    invPivotElement = recip pivotElement
-    normalisedPivotRow = second (multRow invPivotElement) pivotRow
-    d' = d * pivotElement
+    invPivotElement = modInv m pivotElement
+    normalisedPivotRow = second (multRow m invPivotElement) pivotRow
+    d' = (*%) m d pivotElement
     j' = pivotColumn:j
     pivotOperation row =
       let (_,x) = V.head row
-      in addRows (multRow (-x) (snd normalisedPivotRow)) row
+      in addRows m (multRow m (negateMod m x) (snd normalisedPivotRow)) row
     modifiedRows = updateRowTree pivotOperation rowsToModify
     rows' = modifiedRows `Map.union` ignoreRows
     i' = pivotRowNumber:i
     rsDone' = snd normalisedPivotRow:rsDone
-    p = getModulus d
 
 -- | This function solves multiple images of the original system, in
 -- order to reduce the bound on the probability of failure below the
@@ -174,7 +165,7 @@ iteratedForwardElim = do
   PolynomialSystem eqs <- gets system
   goal <- asks failBound
   (p0, xs0) <- choosePoints
-  let (!rs',_,!j,!i) = withMod' p0 $ testMatrixFwd xs0 eqs
+  let (!rs',_,!j,!i) = testMatrixFwd p0 xs0 eqs
       r0 = V.length i
       bound0 = getBound r0 p0
       showBound = tell' "The probability that too many equations were discarded is less than "
@@ -184,7 +175,7 @@ iteratedForwardElim = do
     else let redoTest r bound rs = do
                tell "Iterating to decrease probability of failure."
                (p, xs) <- choosePoints
-               let (_,_,_,i') = withMod' p $ testMatrixFwd xs eqs
+               let (_,_,_,i') = testMatrixFwd p xs eqs
                    r' = V.length i'
                    result = case compare (r,i) (r',i') of
                      EQ -> Good (getBound r p)
@@ -214,14 +205,14 @@ choosePoints = do
   return (p, xs)
 
 -- | Evaluate the polynomials in the IBP equations.
-evalIbps :: forall s . Reifies s Int
-            => Array U DIM1 (Fp s Int)
+evalIbps :: Modulus
+            -> Array U DIM1 Fp
             -> [Equation MPoly]
-            -> BV.Vector (Row s)
-evalIbps xs rs = BV.fromList (map treatRow rs)  where
+            -> BV.Vector Row
+evalIbps m xs rs = BV.fromList (map treatRow rs)  where
   {-# INLINE toPoly #-}
   toPoly (MPoly (cs, es)) = Poly (R.fromUnboxed (Z :. BV.length cs) $ (V.convert . BV.map fromInteger) cs) es
-  treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
+  treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk m xs (BV.map (toPoly . snd) r)) 
 
 -- | During forward elimination, we keep the equations in a sorted
 -- tree.  This has the advantage that it is easy to find the next
@@ -234,37 +225,26 @@ evalIbps xs rs = BV.fromList (map treatRow rs)  where
 -- - number of times this equations has been modified
 -- - number of terms originally in the equation
 -- - original row number
-type RowTree s = Map.Map (Int, Int, Int, Int) (Row s)
-buildRowTree :: BV.Vector (Row s) -> RowTree s
+type RowTree = Map.Map (Int, Int, Int, Int) Row 
+buildRowTree :: BV.Vector Row -> RowTree
 buildRowTree = Map.fromList . BV.toList
                . BV.filter (not . V.null . snd)
                . BV.imap (\ i r -> ((fst (V.head r), 0, V.length r, i), r))
-updateRowTree :: (Row s -> Row s) -> RowTree s -> RowTree s
+updateRowTree :: (Row -> Row) -> RowTree -> RowTree
 updateRowTree f rs =
   Map.fromList . Map.elems . Map.filter (not . V.null . snd)  $
   Map.mapWithKey (\ (_, n, t, i) r -> let r' = f r in ((fst (V.head r'), n+1, t, i), r')) rs
 
 -- | Perform a forward elimination.
-testMatrixFwd :: forall s . Reifies s Int
-                 => V.Vector Int
+testMatrixFwd :: Modulus
+                 -> V.Vector Int
                  -> [Equation MPoly]
-                 -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
-testMatrixFwd xs rs = (rs',d,j,i) where
-  (_, rs', d, j, i) = probeStep ([],  buildRowTree m) 1 [] []
-  m = evalIbps xs' rs
-  xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
+                 -> ([Row], Fp, V.Vector Int, V.Vector Int)
+testMatrixFwd p xs rs = (rs',d,j,i) where
+  (_, rs', d, j, i) = probeStep p ([], buildRowTree m) 1 [] []
+  m = evalIbps p xs' rs
+  xs' = fromUnboxed (Z :. V.length xs) (V.map (normalise p) xs :: V.Vector Fp)
             
--- | Inject modulus to be used in the forward elimination.
-withMod :: Int -> (forall s . Reifies s Int => (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))
-           -> (Int, [V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
-withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))))
-  where symmetricRep' (p,rs,d,j,i) = (p,map (V.map (second unFp)) rs,unFp d,j,i)
-
-withMod' :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int, V.Vector Int))
-           -> ([V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
-withMod' m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
-  where symmetricRep' (rs,d,j,i) = (map (V.map (second unFp)) rs,unFp d,j,i)
-
 -- | Produce a bitmap that visualises how sparse a matrix is.
 writeSparsityBMP :: Bool -> FilePath -> IceMonad ()
 writeSparsityBMP reverseList fName = do
@@ -308,18 +288,16 @@ initialiseEquations = do
     integrals eqs = 
         Map.partitionWithKey (\ k _ -> isBeyond c k)
         (Map.fromList $ concatMap (BV.toList . getIntegrals) eqs `zip` repeat ())
-    processEqs table = map (ibpToRow table)
-    parseAndEval :: Reifies s Int => V.Vector Int -> IO [Ibp (Fp s Int)]
-    parseAndEval xs = do
+    parseAndEval :: Modulus -> V.Vector Int -> IO [Ibp Fp]
+    parseAndEval m xs = do
       let invs = zip (V.toList (V.map fromIntegral xs)) invNames
-          parser = readEquations (evaldIbp (B.pack $ intName c) invs)
+          parser = readEquations (evaldIbp (B.pack $ intName c) m invs)
       parseAction parser
-    unwrap :: Int -> (forall s . Reifies s Int => IO [Ibp (Fp s Int)]) -> IO [Ibp Int]
-    unwrap p x = reify p (\ (_ :: Proxy s) -> liftM ((map . fmap) unFp) (x :: IO [Ibp (Fp s Int)]) )
   if failBound c > 0
     then do
          let invs = zip [0..] invNames
              parser = readEquations (ibp (B.pack $ intName c) invs)
+             processEqs table = map (ibpToRow (+) table)
          equations <- liftIO $ parseAction parser
          let table = integrals equations
          put (StateData (PolynomialSystem $ processEqs table equations)
@@ -327,8 +305,9 @@ initialiseEquations = do
                 (Map.size (fst table) + Map.size (snd table)))
     else do
          (p, xs) <- choosePoints
-         equations <- liftIO $ unwrap p $ parseAndEval xs
+         equations <-liftIO $ parseAndEval p xs
          let table = integrals equations
+             processEqs table = map (ibpToRow ((+%) p) table)
          put (StateData (FpSystem p xs (processEqs table equations))
                  table
                 (Map.size (fst table) + Map.size (snd table)))
@@ -352,7 +331,7 @@ performElimination = do
   s <- gets system
   c <- ask
   (p, rs', _, j, i) <-  case s of
-        FpSystem p _ rs -> return $ withMod p $ probeStep ([], buildRowTree (eqsToRows rs)) 1 [] []
+        FpSystem p _ rs -> return $ probeStep p ([], buildRowTree (eqsToRows p rs)) 1 [] []
         PolynomialSystem _ -> iteratedForwardElim
   let i' = (if sortList c then sort else id) (V.toList i)
   when (visualize c) (
@@ -379,16 +358,15 @@ performElimination = do
   tell' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
   when (visualize c) (writeSparsityBMP True (inputFile c ++ ".forward.bmp"))
                           
-eqsToRows :: forall s . Reifies s Int => [Equation Int] -> BV.Vector (Row s)
-eqsToRows = BV.fromList . map (V.convert . BV.map (second fromIntegral))
+eqsToRows :: Modulus -> [Equation Int] -> BV.Vector Row
+eqsToRows m = BV.fromList . map (V.convert . BV.map (second (normalise m)))
 
 performBackElim :: IceMonad ()
 performBackElim = do
   tell "Perform Backwards elimination.\n"
   forward@(FpSolved p rs _ _) <- gets system
   nOuter <- liftM (Map.size . fst) $ gets integralMaps
-  let rs' = unwrapBackGauss p $
-             backGauss ([],  map (V.map (second normalise))
+  let rs' = backGauss p ([],  map (V.map (second (normalise p)))
                              ((reverse
                                . dropWhile ((< nOuter) . fst . V.head)
                                . reverse) rs))

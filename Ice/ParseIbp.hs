@@ -1,6 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns #-}
 
 -- | Attoparsec-based parser for integration-by-parts equations.
 --
@@ -14,22 +14,21 @@ module Ice.ParseIbp
 import           Control.Applicative
 import           Control.DeepSeq
 import           Control.Monad
-import qualified Data.Array.Repa as R
-import           Data.Array.Repa hiding (map)
+import           Data.Array.Repa             hiding (map)
+import qualified Data.Array.Repa             as R
 import           Data.Array.Repa.Repr.Vector (V, fromListVector)
 import           Data.Attoparsec.Char8
-import qualified Data.ByteString as B
-import           Data.Foldable (asum)
-import           Data.List (foldl')
+import qualified Data.ByteString             as B
+import           Data.Foldable               (asum)
+import           Data.List                   (foldl')
 import           Data.Maybe
-import           Data.Reflection
-import qualified Data.Vector as BV
-import qualified Data.Vector.Unboxed as V
-import           Data.Word (Word8)
+import qualified Data.Vector                 as BV
+import qualified Data.Vector.Unboxed         as V
+import           Data.Word                   (Word8)
 import           Debug.Trace
 import           Ice.Fp
 import           Ice.Types
-import           System.IO.Unsafe (unsafePerformIO)
+import           System.IO.Unsafe            (unsafePerformIO)
 
 -- | Given an association list of invariant names, parse an expression
 -- of the form @x^n@ and yield a pair @(i,n)@, where @i@ is the key of
@@ -41,11 +40,11 @@ power xs = do
   expo <- option 1 $ char '^' *> decimal
   return (coeff, expo)
 
-evaldPower :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
-evaldPower xs = do
+evaldPower :: Modulus -> [(Fp, B.ByteString)] -> Parser Fp
+evaldPower m xs = do
   coeff <- asum (map stringInd xs)
   expo <- option 1 $ char '^' *> decimal
-  return (coeff^expo)
+  return ((^%) m coeff expo)
 
 stringInd :: (a, B.ByteString) -> Parser a
 stringInd (i,s) = string s *> return i
@@ -65,11 +64,11 @@ term xs = do
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i factors)
   return $! Term cf expos
 
-evaldTerm :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
-evaldTerm xs = do
+evaldTerm :: Modulus -> [(Fp, B.ByteString)] -> Parser Fp
+evaldTerm m xs = do
   cf <- coefficient
-  factors <- sepBy' (evaldPower xs) (char '*')
-  return (foldl' (*) (fromInteger cf) factors)
+  factors <- sepBy' (evaldPower m xs) (char '*')
+  return (foldl' ((*%) m) (fromInteger cf) factors)
 
 -- | Parse the indices of an integral.  For example,
 -- @indices \"Int\" \"Int[1,1,2,0]\"@ would yield @[1,1,2,0]@.
@@ -105,15 +104,15 @@ ibpLine intName xs = do
   let poly' = collectTerms (length xs) poly
   return $ IbpLine (SInt inds) poly'
 
-evaldIbpLine :: Reifies s Int => B.ByteString -> [(Fp s Int, B.ByteString)] -> Parser (IbpLine (Fp s Int))
-evaldIbpLine intName xs = do
+evaldIbpLine :: B.ByteString -> Modulus -> [(Fp, B.ByteString)] -> Parser (IbpLine Fp)
+evaldIbpLine intName m xs = do
   inds <- indices intName
   skipSpace
   char '*'
   skipSpace
   char '('
   skipSpace
-  poly <- manyTill' (evaldTerm xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
+  poly <- manyTill' (evaldTerm m xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
   let poly' = foldl' (+) 0 poly
   return $ IbpLine (SInt inds) poly'
 
@@ -125,9 +124,9 @@ ibp intName xs = do
   skipSpace
   return $! Ibp (BV.force $ BV.fromList lines)
 
-evaldIbp :: Reifies s Int => B.ByteString -> [(Fp s Int, B.ByteString)] -> Parser (Ibp (Fp s Int))
-evaldIbp intName xs = do
-  !lines <- manyTill' (evaldIbpLine intName xs) (char ';')
+evaldIbp :: B.ByteString -> Modulus -> [(Fp, B.ByteString)] -> Parser (Ibp Fp)
+evaldIbp intName m xs = do
+  !lines <- manyTill' (evaldIbpLine intName m xs) (char ';')
   skipSpace
   return $! Ibp (BV.force $ BV.fromList lines)
 

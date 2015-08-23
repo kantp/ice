@@ -1,39 +1,40 @@
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE ExistentialQuantification#-}
+{-# LANGUAGE BangPatterns              #-}
+{-# LANGUAGE DeriveDataTypeable        #-}
+{-# LANGUAGE DeriveFunctor             #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE TypeSynonymInstances      #-}
 module Ice.Types
 
 where
 
 import           Control.Monad.RWS
-import qualified Data.Array.Repa as R
-import           Data.List (intercalate)
-import qualified Data.Map.Strict as Map
+import qualified Data.Array.Repa        as R
+import           Data.Int               (Int64)
+import           Data.List              (intercalate)
+import qualified Data.Map.Strict        as Map
 import           Data.Ord
-import qualified Data.Vector as BV
-import qualified Data.Vector.Unboxed as V
-import           Data.Word (Word8)
+import qualified Data.Vector            as BV
+import qualified Data.Vector.Unboxed    as V
+import           Data.Word              (Word8)
 import           System.Console.CmdArgs
 
 
 -- | Configuration via cmdargs library.
-data Config = Config { inputFile :: FilePath
-                     , dumpFile :: FilePath
-                     , logFile :: FilePath
-                     , intName :: String
+data Config = Config { inputFile  :: FilePath
+                     , dumpFile   :: FilePath
+                     , logFile    :: FilePath
+                     , intName    :: String
                      , invariants :: [String]
-                     , sortList :: Bool
-                     , backsub :: Bool
-                     , rMax :: Int
-                     , sMax :: Int
-                     , visualize :: Bool
-                     , failBound :: Double
-                     , pipes :: Bool
+                     , sortList   :: Bool
+                     , backsub    :: Bool
+                     , rMax       :: Int
+                     , sMax       :: Int
+                     , visualize  :: Bool
+                     , failBound  :: Double
+                     , pipes      :: Bool
                      } deriving (Show, Data, Typeable)
 
 -- | Default values of configuration.
@@ -58,9 +59,9 @@ config = Config { inputFile = def &= args &= typ "FILE"
 
 -- | State of the computation: the linear system, the sorted
 -- integrals, and number of integrals.
-data StateData = StateData { system :: LinSystem
+data StateData = StateData { system       :: LinSystem
                            , integralMaps :: (Map.Map SInt (), Map.Map SInt ())
-                           , nIntegrals :: Int
+                           , nIntegrals   :: Int
                            } deriving Show
 
 -- | State Monad of Ice.
@@ -71,11 +72,11 @@ type IceMonad a = RWST Config String StateData IO a
 -- image.
 data LinSystem = PolynomialSystem [Equation MPoly]
                | FpSystem { prime :: Int
-                          , as :: V.Vector Int
-                          , mijs :: [Equation Int] }
-               | FpSolved { prime :: Int
-                          , image :: [V.Vector (Int, Int)]
-                          , rowNumbers :: [Int]
+                          , as    :: V.Vector Int
+                          , mijs  :: [Equation Int] }
+               | FpSolved { prime              :: Int
+                          , image              :: [V.Vector (Int, Int)]
+                          , rowNumbers         :: [Int]
                           , pivotColumnNumbers :: V.Vector Int} deriving Show
 
 -- | Count the number of equations in a linear system.
