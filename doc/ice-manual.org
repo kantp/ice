@@ -1,7 +1,7 @@
 #+TITLE:     ICE --- the IBP Chooser of Equations
-#+AUTHOR:    Philipp Kant \\Humboldt-Universität zu Berlin, Institut für Physik, \\Newtonstraße 15, 12489 Berlin
+#+AUTHOR:    Philipp Kant
 #+EMAIL:     philipp.kant@physik.hu-berlin.de
-# +DATE:      2013-09-24 Tue
+#+DATE:      2015-08-23
 #+DESCRIPTION:
 #+KEYWORDS:
 #+LANGUAGE:  en
@@ -13,7 +13,6 @@
 #+LINK_UP:   
 #+LINK_HOME: 
 #+XSLT:
-#+LATEX_CLASS:scrartcl
 #+LATEX_HEADER: \usepackage{amsmath}
 #+LATEX_HEADER: \usepackage{libertine}
 #+LATEX_HEADER: \newcommand{\Fp}{\ensuremath{\mathbb{F}_p}}
@@ -28,24 +27,12 @@ publication.
 #+END_abstract
 
 * Installation
-The easiest way to compile the program from source is to use the cabal
-build system.  It is included in the Haskell
-Platform[fn:http://www.haskell.org/platform/], which is available on
-most modern systems, including GNU/Linux, Windows, and OS/X.  If you
-have the Haskell Platform installed, the following commands, executed
-from the source directory, will install all needed libraries and
-compile the program
+The easiest way to compile the program from source is to use the stack build tool, avaialble at https://github.com/commercialhaskell/stack.
+Executing
 #+BEGIN_SRC shell
-cabal update
-cabal install --only-dependencies
-cabal configure
-cabal build
+stack install
 #+END_SRC
-This will create the executable file =./dist/build/ice/ice=.
-# Alternatively, there are binary executables for some systems available
-# from
-
-# http://www.physik.hu-berlin.de/pep/tools.
+in the directory containing the sources of ice will install the ice executable to =$HOME/.local/bin/ice=.
 * Usage
 ICE is run as
 #+BEGIN_SRC shell
