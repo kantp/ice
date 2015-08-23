@@ -51,14 +51,6 @@ negateMod :: Modulus -> Fp -> Fp
 {-# INLINE negateMod #-}
 negateMod m x = normalise m (-x)
 
--- | Return the symmetric representation of a modular number.
-symmetricRep :: Modulus -> Fp -> Int
-symmetricRep m x
-  | x > halfModulus = x - m
-  | x < - halfModulus = x + m
-  | otherwise = x
-  where halfModulus = m `div` 2
-
 -- | Inject a value into a modular computation.
 normalise :: Modulus -> Int -> Fp
 {-# INLINE normalise #-}
@@ -79,6 +71,7 @@ multRow _ 0 _ = V.empty
 multRow p !x !row = V.map (second ((*%) p x)) row
 
 {-# INLINE addRows #-}
+addRows :: Modulus -> V.Vector (Int, Fp) -> V.Vector (Int, Fp) -> V.Vector (Int, Fp)
 addRows p !r1 !r2 = V.unfoldr step (r1, r2) where
   step (x, y)
     | V.null x && V.null y = Nothing

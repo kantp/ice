@@ -67,12 +67,12 @@ evaldTerm m xs = do
 -- | Parse the indices of an integral.  For example,
 -- @indices \"Int\" \"Int[1,1,2,0]\"@ would yield @[1,1,2,0]@.
 indices :: B.ByteString -> Parser (V.Vector Int)
-indices intName = do
-  skipSpace
-  string intName
-  char '['
+indices intNameString = do
+  _ <- skipSpace
+  _ <- string intNameString
+  _ <- char '['
   !inds <- liftM V.fromList $ sepBy' (signed decimal) (char ',')
-  char ']'
+  _ <- char ']'
   return $! inds
 
 -- | Transform a list of Terms, as parsed by 'term', into a
@@ -80,31 +80,31 @@ indices intName = do
 collectTerms :: Int -> [Term] -> MPoly
 collectTerms !nVars !ts =
   let !nTerms = length ts
-      !cfs = BV.force $ BV.fromList [ x | (Term x _) <- ts]
-      !exps = fromUnboxed (Z :. nTerms :. nVars) (V.concat (map (\ (Term _ x) -> x) ts))
-  in MPoly (cfs, exps)
+      !coeffs = BV.force $ BV.fromList [ x | (Term x _) <- ts]
+      !exponents = fromUnboxed (Z :. nTerms :. nVars) (V.concat (map (\ (Term _ x) -> x) ts))
+  in MPoly (coeffs, exponents)
 
 -- | Parse one line containing one integral and a polynomial that is
 -- the coefficient of this integral in the equation.
 ibpLine :: B.ByteString -> [(Int, B.ByteString)] -> Parser (IbpLine MPoly)
-ibpLine intName xs = do
-  inds <- indices intName
+ibpLine intNameString xs = do
+  inds <- indices intNameString
   skipSpace
-  char '*'
+  _ <- char '*'
   skipSpace
-  char '('
+  _ <- char '('
   skipSpace
   poly <- manyTill' (term xs) (skipSpace >> char ')' >> endOfLine)
   let poly' = collectTerms (length xs) poly
   return $ IbpLine (SInt inds) poly'
 
 evaldIbpLine :: B.ByteString -> Modulus -> [(Fp, B.ByteString)] -> Parser (IbpLine Fp)
-evaldIbpLine intName m xs = do
-  inds <- indices intName
+evaldIbpLine intNameString m xs = do
+  inds <- indices intNameString
   skipSpace
-  char '*'
+  _ <- char '*'
   skipSpace
-  char '('
+  _ <- char '('
   skipSpace
   poly <- manyTill' (evaldTerm m xs) (skipSpace >> char ')' >> endOfLine)
   let poly' = foldl' (+) 0 poly
@@ -113,14 +113,14 @@ evaldIbpLine intName m xs = do
 -- | Parse one equation.  An equation consists of one or more
 -- 'ibpLine's, terminated by a semicolon (on a separate line).
 ibp :: B.ByteString -> [(Int, B.ByteString)] -> Parser (Ibp MPoly)
-ibp intName xs = do
-  !lines <- manyTill' (ibpLine intName xs) (char ';')
+ibp intNameString xs = do
+  !ibpLines <- manyTill' (ibpLine intNameString xs) (char ';')
   skipSpace
-  return $! Ibp (BV.force $ BV.fromList lines)
+  return $! Ibp (BV.force $ BV.fromList ibpLines)
 
 evaldIbp :: B.ByteString -> Modulus -> [(Fp, B.ByteString)] -> Parser (Ibp Fp)
-evaldIbp intName m xs = do
-  !lines <- manyTill' (evaldIbpLine intName m xs) (char ';')
+evaldIbp intNameString m xs = do
+  !ibpLines <- manyTill' (evaldIbpLine intNameString m xs) (char ';')
   skipSpace
-  return $! Ibp (BV.force $ BV.fromList lines)
+  return $! Ibp (BV.force $ BV.fromList ibpLines)
 

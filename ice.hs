@@ -15,7 +15,6 @@ import           Control.Monad.RWS
 import           Control.Monad.Random
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map, (++))
-import           Data.Attoparsec.ByteString
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
 import           Data.Conduit.Attoparsec (conduitParser)
@@ -289,8 +288,8 @@ initialiseEquations = do
                      =$= mapC snd
                      $$ sinkList
          let table = integrals equations
-             processEqs table = map (ibpToRow ((+%) p) table)
-         put (StateData (FpSystem p xs (processEqs table equations))
+             processEqs = map (ibpToRow ((+%) p) table)
+         put (StateData (FpSystem p xs (processEqs equations))
                  table
                 (Map.size (fst table) + Map.size (snd table)))
   s <- get
@@ -315,6 +314,7 @@ performElimination = do
   (p, rs', _, j, i) <-  case s of
         FpSystem p _ rs -> return $ probeStep p ([], buildRowTree (eqsToRows p rs)) 1 [] []
         PolynomialSystem _ -> iteratedForwardElim
+        FpSolved _ _ _ _ -> error "trying performElimination on solved system."
   let i' = (if sortList c then sort else id) (V.toList i)
   when (visualize c) (
     modify (\ x -> x {system = selectRows i' s}) >>

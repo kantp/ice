@@ -82,6 +82,7 @@ data LinSystem = PolynomialSystem [Equation MPoly]
 nEq :: LinSystem -> Int
 nEq (PolynomialSystem xs) = length xs
 nEq (FpSystem _ _ xs) = length xs
+nEq (FpSolved _ _ _ xs) = V.length xs
 
 -- | Select a subset of rows from a system of equations.
 selectRows :: [Int] -> LinSystem -> LinSystem
@@ -155,6 +156,8 @@ instance Num MPoly where
   signum =      error "signum not implemented for multivariate polynomials."
   fromInteger = error "fromInteger not implemented for multivariate polynomials."
   abs =         error "abs not implemented for multivariate polynomials."
+  negate =      error "negate not implemented for multivariate polynomials."
+
 
 type Equation a = BV.Vector (Int, a)
 
