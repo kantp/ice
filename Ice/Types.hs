@@ -1,39 +1,39 @@
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE ExistentialQuantification#-}
+{-# LANGUAGE BangPatterns              #-}
+{-# LANGUAGE DeriveDataTypeable        #-}
+{-# LANGUAGE DeriveFunctor             #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE TypeSynonymInstances      #-}
 module Ice.Types
 
 where
 
 import           Control.Monad.RWS
-import qualified Data.Array.Repa as R
-import           Data.List (intercalate)
-import qualified Data.Map.Strict as Map
+import qualified Data.Array.Repa        as R
+import           Data.List              (intercalate)
+import qualified Data.Map.Strict        as Map
 import           Data.Ord
-import qualified Data.Vector as BV
-import qualified Data.Vector.Unboxed as V
-import           Data.Word (Word8)
+import qualified Data.Vector            as BV
+import qualified Data.Vector.Unboxed    as V
+import           Data.Word              (Word8)
 import           System.Console.CmdArgs
 
 
 -- | Configuration via cmdargs library.
-data Config = Config { inputFile :: FilePath
-                     , dumpFile :: FilePath
-                     , logFile :: FilePath
-                     , intName :: String
+data Config = Config { inputFile  :: FilePath
+                     , dumpFile   :: FilePath
+                     , logFile    :: FilePath
+                     , intName    :: String
                      , invariants :: [String]
-                     , sortList :: Bool
-                     , backsub :: Bool
-                     , rMax :: Int
-                     , sMax :: Int
-                     , visualize :: Bool
-                     , failBound :: Double
-                     , pipes :: Bool
+                     , sortList   :: Bool
+                     , backsub    :: Bool
+                     , rMax       :: Int
+                     , sMax       :: Int
+                     , visualize  :: Bool
+                     , failBound  :: Double
+                     , pipes      :: Bool
                      } deriving (Show, Data, Typeable)
 
 -- | Default values of configuration.
@@ -58,9 +58,9 @@ config = Config { inputFile = def &= args &= typ "FILE"
 
 -- | State of the computation: the linear system, the sorted
 -- integrals, and number of integrals.
-data StateData = StateData { system :: LinSystem
+data StateData = StateData { system       :: LinSystem
                            , integralMaps :: (Map.Map SInt (), Map.Map SInt ())
-                           , nIntegrals :: Int
+                           , nIntegrals   :: Int
                            } deriving Show
 
 -- | State Monad of Ice.
@@ -71,17 +71,18 @@ type IceMonad a = RWST Config String StateData IO a
 -- image.
 data LinSystem = PolynomialSystem [Equation MPoly]
                | FpSystem { prime :: Int
-                          , as :: V.Vector Int
-                          , mijs :: [Equation Int] }
-               | FpSolved { prime :: Int
-                          , image :: [V.Vector (Int, Int)]
-                          , rowNumbers :: [Int]
+                          , as    :: V.Vector Int
+                          , mijs  :: [Equation Int] }
+               | FpSolved { prime              :: Int
+                          , image              :: [V.Vector (Int, Int)]
+                          , rowNumbers         :: [Int]
                           , pivotColumnNumbers :: V.Vector Int} deriving Show
 
 -- | Count the number of equations in a linear system.
 nEq :: LinSystem -> Int
 nEq (PolynomialSystem xs) = length xs
 nEq (FpSystem _ _ xs) = length xs
+nEq (FpSolved _ xs _ _) = length xs
 
 -- | Select a subset of rows from a system of equations.
 selectRows :: [Int] -> LinSystem -> LinSystem
@@ -152,6 +153,7 @@ instance Num MPoly where
   (+) (MPoly (!x1,!y1)) (MPoly (!x2,!y2)) =
     MPoly (BV.force $ x1 BV.++ x2, R.computeS $ R.transpose (R.transpose y1 R.++ R.transpose y2))
   (*) =         error "(*) not implemented for multivariate polynomials."
+  (-) =         error "(-) not implemented for multivariate polynomials."
   signum =      error "signum not implemented for multivariate polynomials."
   fromInteger = error "fromInteger not implemented for multivariate polynomials."
   abs =         error "abs not implemented for multivariate polynomials."

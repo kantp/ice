@@ -1,7 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
-
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+{-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 -- | Attoparsec-based parser for integration-by-parts equations.
 --
 -- We can either parse polynomials to a sparse representation, or
@@ -11,13 +12,9 @@ module Ice.ParseIbp
        (ibp, evaldIbp)
        where
 
-import           Control.Applicative
-import           Control.DeepSeq
 import           Control.Monad
-import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map)
-import           Data.Array.Repa.Repr.Vector (V, fromListVector)
-import           Data.Attoparsec.Char8
+import           Data.Attoparsec.ByteString.Char8
 import qualified Data.ByteString as B
 import           Data.Foldable (asum)
 import           Data.List (foldl')
@@ -26,10 +23,8 @@ import           Data.Reflection
 import qualified Data.Vector as BV
 import qualified Data.Vector.Unboxed as V
 import           Data.Word (Word8)
-import           Debug.Trace
 import           Ice.Fp
 import           Ice.Types
-import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Given an association list of invariant names, parse an expression
 -- of the form @x^n@ and yield a pair @(i,n)@, where @i@ is the key of
@@ -44,7 +39,7 @@ power xs = do
 evaldPower :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
 evaldPower xs = do
   coeff <- asum (map stringInd xs)
-  expo <- option 1 $ char '^' *> decimal
+  expo <- option 1 $ char '^' *> (decimal :: Parser Int)
   return (coeff^expo)
 
 stringInd :: (a, B.ByteString) -> Parser a

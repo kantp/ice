@@ -24,8 +24,6 @@ import           Data.Array.Repa.Eval         (Elt)
 import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector                  as BV
-import           Data.Vector.Generic.Base
-import           Data.Vector.Generic.Mutable
 import qualified Data.Vector.Unboxed          as V
 import           Data.Vector.Unboxed.Deriving
 import           Data.Word                    (Word8)
@@ -95,10 +93,16 @@ modInv x = let (_, inverse, _) = eea (unFp x) (getModulus x)
 type Row s = V.Vector (Int, Fp s Int)
 
 {-# INLINE multRow #-}
+multRow :: forall b d.
+                 (Eq b, Num b, V.Unbox b, V.Unbox d) =>
+                 b -> V.Vector (d, b) -> V.Vector (d, b)
 multRow 0 _ = V.empty
 multRow !x !row = V.map (second (*x)) row
 
 {-# INLINE addRows #-}
+addRows :: forall a a1.
+                 (Eq a1, Num a1, Ord a, V.Unbox a, V.Unbox a1) =>
+                 V.Vector (a, a1) -> V.Vector (a, a1) -> V.Vector (a, a1)
 addRows !r1 !r2 = V.unfoldr step (r1, r2) where
   step (x, y)
     | V.null x && V.null y = Nothing
@@ -114,7 +118,7 @@ addRows !r1 !r2 = V.unfoldr step (r1, r2) where
           0 -> step (V.tail x, V.tail y)
           val -> Just ((xi, val), (V.tail x, V.tail y))
 
-data Poly s = Poly { cfs :: !(Array U DIM1 (Fp s Int))
+data Poly s = Poly { cfs  :: !(Array U DIM1 (Fp s Int))
                    , exps :: !(Array U DIM2 Word8) -- ^ exps[(term :. variable)]=exponent
                    } deriving (Eq, Show)
 

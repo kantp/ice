@@ -14,7 +14,7 @@ import           Control.Monad.Random
 import           Control.Monad.RWS
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map, (++))
-import           Data.Attoparsec
+import           Data.Attoparsec.ByteString
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.IntMap.Strict as IntMap
@@ -77,6 +77,7 @@ readEquations parser h = go (0 :: Int) [] =<< refill h
               then return $! (x:acc)
               else go (n+1) (x:acc) s
           | otherwise -> go (n+1) (x:acc) bs
+        Partial _ -> error "Incomplete input."
 
 -- | Determine which integrals appear in a certain equation.
 getIntegrals :: Ibp a -> BV.Vector SInt
@@ -354,6 +355,7 @@ performElimination = do
   (p, rs', _, j, i) <-  case s of
         FpSystem p _ rs -> return $ withMod p $ probeStep ([], buildRowTree (eqsToRows rs)) 1 [] []
         PolynomialSystem _ -> iteratedForwardElim
+        FpSolved _ _ _ _ -> error "Internal error: tried solving a solved system. Please report this as a bug."
   let i' = (if sortList c then sort else id) (V.toList i)
   when (visualize c) (
     modify (\ x -> x {system = selectRows i' s}) >>
