@@ -1,7 +1,12 @@
 flags: {}
 packages:
-- '.'
-extra-deps: []
+  - '.'
+  - location:
+      git: git@github.com:ekmett/discrimination.git
+      commit: 22e53e987513d66b23eff4f29cc333992bbb2149
+extra-deps:
+  - discrimination-0.1
+  - promises-0.2
 resolver: lts-4.1
 # Automatically install GHC when needed
 install-ghc: true

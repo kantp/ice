@@ -32,6 +32,7 @@ import           Ice.ParseIbp
 import           Ice.Types
 import           System.Console.CmdArgs
 import           System.IO
+import qualified Data.Discrimination as Disc
 
 -- | A list of pre-generated prime numbers such that the square just fits into a 64bit Integer.
 pList :: [Int]
@@ -237,12 +238,12 @@ evalIbps xs rs = BV.fromList (map treatRow rs)  where
 -- - original row number
 type RowTree s = Map.Map (Int, Int, Int, Int) (Row s)
 buildRowTree :: BV.Vector (Row s) -> RowTree s
-buildRowTree = Map.fromList . BV.toList
+buildRowTree = Disc.toMap . BV.toList
                . BV.filter (not . V.null . snd)
                . BV.imap (\ i r -> ((fst (V.head r), 0, V.length r, i), r))
 updateRowTree :: (Row s -> Row s) -> RowTree s -> RowTree s
 updateRowTree f rs =
-  Map.fromList . Map.elems . Map.filter (not . V.null . snd)  $
+  Disc.toMap . Map.elems . Map.filter (not . V.null . snd)  $
   Map.mapWithKey (\ (_, n, t, i) r -> let r' = f r in ((fst (V.head r'), n+1, t, i), r')) rs
 
 -- | Perform a forward elimination.
