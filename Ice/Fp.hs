@@ -1,11 +1,13 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
 -- | F_p, the field of integers modulo the prime p.
 module Ice.Fp
   ( Fp ()
@@ -16,25 +18,27 @@ module Ice.Fp
   , Poly (..), multiEval, multiEvalBulk
   )  where
 
-import           Control.Arrow (second)
-import           Data.Array.Repa as R
-import           Data.Array.Repa.Eval (Elt)
+import           Control.Arrow                (second)
+import           Data.Array.Repa              as R
+import           Data.Array.Repa.Eval         (Elt)
 import           Data.Proxy
 import           Data.Reflection
-import qualified Data.Vector as BV
+import qualified Data.Vector                  as BV
 import           Data.Vector.Generic.Base
 import           Data.Vector.Generic.Mutable
-import qualified Data.Vector.Unboxed as V
-import           Data.Word (Word8)
+import qualified Data.Vector.Unboxed          as V
+import           Data.Vector.Unboxed.Deriving
+import           Data.Word                    (Word8)
 
 -- | Use the reflection package to implement modular arithmetic.  The
 --   type @s@ keeps track of the modulus, while @a@ is the actual
 --   datatype we want to perform arithmetic with.
 newtype Fp s a = Fp a deriving (Show, Eq, Ord)
 
-deriving instance (Vector V.Vector a) => Vector V.Vector (Fp s a)
-deriving instance (MVector V.MVector a) => MVector V.MVector (Fp s a)
-deriving instance (V.Unbox a) => V.Unbox (Fp s a)
+derivingUnbox "Fp"
+  [t| forall s a . (V.Unbox a) => Fp s a -> a |]
+  [| \(Fp a) -> a |]
+  [| \a -> Fp a |]
 deriving instance (Elt a) => Elt (Fp s a)
 
 -- | unwrap data from the 'Fp' wrapper.
