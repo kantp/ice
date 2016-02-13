@@ -1,3 +1,20 @@
+{-|
+Module: Ice.Fp
+Description: Implements arithmetic in @F_p@, the field of integers modulo a prime @p@.
+Maintainer: philipp.kant7@gmail.com
+
+We keep track of the value of @p@ via reflection, as described in
+"Functional Pearl: Implicit Configurations -- or, Type Classes Reflect the Values of Types"
+<http://okmij.org/ftp/Haskell/tr-15-04.pdf>
+
+This way, the type system ensures that we never mix up numbers from
+different fields @F_p@ and @F_p'@.  It also relieves us from the
+burden of passing around the value of @p@ as an additional parameter,
+and allows us to write an instance of the 'Num' typeclass for numbers
+in @F_p@.
+
+-}
+
 {-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -8,7 +25,7 @@
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
--- | F_p, the field of integers modulo the prime p.
+
 module Ice.Fp
   ( Fp ()
   , unFp, symmetricRep
@@ -29,10 +46,12 @@ import           Data.Vector.Unboxed.Deriving
 import           Data.Word                    (Word8)
 
 -- | Use the reflection package to implement modular arithmetic.  The
---   type @s@ keeps track of the modulus, while @a@ is the actual
---   datatype we want to perform arithmetic with.
+-- type @s@ keeps track of the modulus, while @a@ is the actual
+-- datatype we want to perform arithmetic with.
 newtype Fp s a = Fp a deriving (Show, Eq, Ord)
 
+-- We want to put numbers in F_p in unboxed vectors for efficiency.
+-- This template haskell code writes the appropriate instances.
 derivingUnbox "Fp"
   [t| forall s a . (V.Unbox a) => Fp s a -> a |]
   [| \(Fp a) -> a |]
@@ -59,6 +78,12 @@ normalise :: forall s a . (Reifies s a, Integral a) => a -> Fp s a
 {-# INLINE normalise #-}
 normalise !a = Fp (a `mod` reflect (undefined :: Proxy s))
 
+-- | After adding or multiplying two numbers, we'll have to take the
+-- remainder again to make sure the result is in F_p again.  We could
+-- use 'normalise', but if we know that the number we start with is
+-- positive, we can use 'rem' instead of 'mod', which is more
+-- efficient.  We'll do this often and in inner loops, so it's not a
+-- case of premature optimisation.
 takeRem :: forall s a . (Reifies s a, Integral a) => a -> Fp s a
 {-# INLINE takeRem #-}
 takeRem !a = Fp (a `rem` reflect (undefined :: Proxy s))
@@ -83,8 +108,9 @@ instance (Reifies s a, Integral a) => Fractional (Fp s a) where
   recip = modInv
   fromRational = error "trying to convert rational to F_p"
 
--- | Modular inverse.
+-- | Modular inverse, via extended Euclidean algorithm.
 modInv :: (Reifies s t, Integral t) => Fp s t -> Fp s t
+{-# INLINE modInv #-}
 modInv x = let (_, inverse, _) = eea (unFp x) (getModulus x)
            in normalise inverse
 
@@ -92,6 +118,7 @@ modInv x = let (_, inverse, _) = eea (unFp x) (getModulus x)
 -- index, snd entry the value.
 type Row s = V.Vector (Int, Fp s Int)
 
+-- | Multiplication of a matrix row with a scalar value.
 {-# INLINE multRow #-}
 multRow :: forall b d.
                  (Eq b, Num b, V.Unbox b, V.Unbox d) =>
@@ -99,27 +126,44 @@ multRow :: forall b d.
 multRow 0 _ = V.empty
 multRow !x !row = V.map (second (*x)) row
 
-{-# INLINE addRows #-}
+-- | Add two matrix rows.
+{-# SPECIALIZE addRows :: Reifies s Int
+                       => V.Vector (Int, Fp s Int)
+                       -> V.Vector (Int, Fp s Int)
+                       -> V.Vector (Int, Fp s Int) #-}
 addRows :: forall a a1.
                  (Eq a1, Num a1, Ord a, V.Unbox a, V.Unbox a1) =>
                  V.Vector (a, a1) -> V.Vector (a, a1) -> V.Vector (a, a1)
 addRows !r1 !r2 = V.unfoldr step (r1, r2) where
-  step (x, y)
-    | V.null x && V.null y = Nothing
-    | V.null x = Just (V.head y, (x, V.tail y))
-    | V.null y = Just (V.head x, (V.tail x, y))
-    | otherwise =
-      let (xi, xval) = V.head x
-          (yi, yval) = V.head y
+  step (!x, !y)
+    | V.null x && V.null y = Nothing -- We're done.
+    | V.null x = -- The first row has no more entries, we just need to
+                 -- traverse the second row.  Note that the calls to
+                 -- unsafeHead and unsafeTail below are all safe,
+                 -- since we checked that the vectors are non-empty.
+      Just (V.unsafeHead y, (x, V.unsafeTail y))
+    | V.null y = -- As above, with first and second row replaced.
+      Just (V.unsafeHead x, (V.unsafeTail x, y))
+    | otherwise = -- The interesting case: both rows have elements left.
+      let (!xi, !xval) = V.unsafeHead x
+          (!yi, !yval) = V.unsafeHead y
       in case compare xi yi of
-        LT -> Just ((xi, xval), (V.tail x, y))
-        GT -> Just ((yi, yval), (x, V.tail y))
+        LT -> Just ((xi, xval), (V.unsafeTail x, y))
+        GT -> Just ((yi, yval), (x, V.unsafeTail y))
         EQ -> case xval + yval of
-          0 -> step (V.tail x, V.tail y)
-          val -> Just ((xi, val), (V.tail x, V.tail y))
+          0 -> step (V.unsafeTail x, V.unsafeTail y)
+          val -> Just ((xi, val), (V.unsafeTail x, V.unsafeTail y))
 
+-- | A multivariate polynomial over F_p.  We use a semi-sparse
+-- representation.  Only non-zero terms are recorded, but for every
+-- non-zero term, all the exponents (even the zeroes) are kept.  This
+-- allows bulk evaluation of many polynomials, using the REPA library.
 data Poly s = Poly { cfs  :: !(Array U DIM1 (Fp s Int))
-                   , exps :: !(Array U DIM2 Word8) -- ^ exps[(term :. variable)]=exponent
+                   -- ^ The non-zero coefficients.
+                   , exps :: !(Array U DIM2 Word8)
+                   -- ^ The exponents. The first index is aligned with
+                   -- @cfs@, the second index enumerates the
+                   -- variables.
                    } deriving (Eq, Show)
 
 -- | Evaluation of a multivariate polynomial.
@@ -154,7 +198,7 @@ multiEvalBulk !xs !ps = V.convert (BV.map evalPoly ps)
     maxPowers :: Array R.D DIM2 Word8 -> Array U DIM1 Word8
     maxPowers = R.foldS max 0 . R.transpose
     concatTerms :: BV.Vector (Array R.D DIM2 Word8) -> Array R.D DIM2 Word8
-    concatTerms =  R.transpose . BV.foldl1' R.append . BV.map R.transpose -- (R.append . R.transpose)
+    concatTerms =  R.transpose . BV.foldl1' R.append . BV.map R.transpose
     generatePowers :: Word8 -> Fp s Int -> V.Vector (Fp s Int)
     generatePowers n x = V.iterateN (fromIntegral n+1) (*x) 1
 
@@ -162,9 +206,9 @@ multiEvalBulk !xs !ps = V.convert (BV.map evalPoly ps)
 eea :: (Integral a) => a -> a -> (a,a,a)
 {-# INLINE eea #-}
 eea !a !b = eea' (abs a) (abs b) 1 0 0 1 where
-  eea' !c !0 !c1 !_ !c2 !_ = ( abs c
-                       , c1 `div` (signum a*signum c)
-                       , c2 `div` (signum b*signum c) )
+  eea' !c 0 !c1 !_ !c2 !_ = ( abs c
+                      , c1 `div` (signum a*signum c)
+                      , c2 `div` (signum b*signum c) )
   eea' !c !d !c1 !d1 !c2 !d2 =
     let
       q = c `div` d
