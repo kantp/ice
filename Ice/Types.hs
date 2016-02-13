@@ -23,6 +23,7 @@ module Ice.Types
        , LinSystem (..), sparsityPattern, nEq, selectRows
        -- * Result of a Monte Carlo run
        , TestResult (..)
+       , EliminationResult (..)
        -- * Monad in which the program runs
        , IceMonad, StateData (..)
        )
@@ -30,12 +31,15 @@ where
 
 import           Control.Monad.RWS
 import qualified Data.Array.Repa        as R
+import           Data.Int               (Int64)
 import           Data.List              (intercalate)
 import qualified Data.Map.Strict        as Map
 import           Data.Ord
+import           Data.Reflection
 import qualified Data.Vector            as BV
 import qualified Data.Vector.Unboxed    as V
 import           Data.Word              (Word8)
+import           Ice.Fp
 import           System.Console.CmdArgs
 
 
@@ -91,11 +95,11 @@ type Equation a = BV.Vector (Int, a)
 -- an image under evaluation modulo a prime, or a solution of an
 -- image.
 data LinSystem = PolynomialSystem [Equation MPoly]
-               | FpSystem { prime :: Int
-                          , as    :: V.Vector Int
-                          , mijs  :: [Equation Int] }
-               | FpSolved { prime              :: Int
-                          , image              :: [V.Vector (Int, Int)]
+               | FpSystem { prime :: Int64
+                          , as    :: V.Vector Int64
+                          , mijs  :: [Equation Int64] }
+               | FpSolved { prime              :: Int64
+                          , image              :: [V.Vector (Int, Int64)]
                           , rowNumbers         :: [Int]
                           , pivotColumnNumbers :: V.Vector Int} deriving Show
 
@@ -180,5 +184,16 @@ data TestResult = Unlucky -- ^ We have hit a bad evaluation point and have to di
                 | Restart -- ^ The previous run had a bad evaluation point, and we have to restart.
                 | Good !Double -- ^ We have not detected a bad point, and the chance that our result is wrong is less than this.
 
-
-
+-- | Result of a forward elimination.
+data EliminationResult s = EliminationResult
+  { resP         :: !Int64
+  -- ^ prime number used in the elimination
+  , resRows      :: [Row s]
+  -- ^ non-zero rows after forward elimination
+  , det          :: !(Fp s Int64)
+  -- ^ determinant of the system
+  , pivotColumns :: !(V.Vector Int)
+  -- ^ columns of pivot elements
+  , pivotRows    :: !(V.Vector Int)
+  -- ^ rows of pivot elements
+  }

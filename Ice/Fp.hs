@@ -38,6 +38,7 @@ module Ice.Fp
 import           Control.Arrow                (second)
 import           Data.Array.Repa              as R
 import           Data.Array.Repa.Eval         (Elt)
+import           Data.Int                     (Int64)
 import           Data.Proxy
 import           Data.Reflection
 import qualified Data.Vector                  as BV
@@ -93,7 +94,7 @@ getModulus :: forall s a . (Reifies s a) => Fp s a -> a
 getModulus _ = reflect (undefined :: Proxy s)
 
 instance (Reifies s a, Integral a) => Num (Fp s a) where
-  {-# SPECIALIZE instance (Reifies s Int) => Num (Fp s Int) #-}
+  {-# SPECIALIZE instance (Reifies s Int64) => Num (Fp s Int64) #-}
   Fp a + Fp b = takeRem (a + b)
   Fp a * Fp b = takeRem (a * b)
   negate (Fp a) = normalise (negate a)
@@ -104,7 +105,7 @@ instance (Reifies s a, Integral a) => Num (Fp s a) where
   abs = error "abs in finite field"
 
 instance (Reifies s a, Integral a) => Fractional (Fp s a) where
-  {-# SPECIALIZE instance (Reifies s Int) => Fractional (Fp s Int) #-}
+  {-# SPECIALIZE instance (Reifies s Int64) => Fractional (Fp s Int64) #-}
   recip = modInv
   fromRational = error "trying to convert rational to F_p"
 
@@ -116,24 +117,22 @@ modInv x = let (_, inverse, _) = eea (unFp x) (getModulus x)
 
 -- | Sparse row of a matrix.  First entry of any pair is the column
 -- index, snd entry the value.
-type Row s = V.Vector (Int, Fp s Int)
+--
+-- We're specialising to @Fp Int64@ below, since that is all we'll use
+-- in ICE.
+type Row s = V.Vector (Int, Fp s Int64)
 
 -- | Multiplication of a matrix row with a scalar value.
 {-# INLINE multRow #-}
-multRow :: forall b d.
-                 (Eq b, Num b, V.Unbox b, V.Unbox d) =>
-                 b -> V.Vector (d, b) -> V.Vector (d, b)
+multRow :: forall s . Reifies s Int64 => Fp s Int64 -> Row s -> Row s
 multRow 0 _ = V.empty
 multRow !x !row = V.map (second (*x)) row
 
 -- | Add two matrix rows.
-{-# SPECIALIZE addRows :: Reifies s Int
-                       => V.Vector (Int, Fp s Int)
-                       -> V.Vector (Int, Fp s Int)
-                       -> V.Vector (Int, Fp s Int) #-}
-addRows :: forall a a1.
-                 (Eq a1, Num a1, Ord a, V.Unbox a, V.Unbox a1) =>
-                 V.Vector (a, a1) -> V.Vector (a, a1) -> V.Vector (a, a1)
+addRows :: Reifies s Int64
+          => V.Vector (Int, Fp s Int64)
+          -> V.Vector (Int, Fp s Int64)
+          -> V.Vector (Int, Fp s Int64)
 addRows !r1 !r2 = V.unfoldr step (r1, r2) where
   step (!x, !y)
     | V.null x && V.null y = Nothing -- We're done.
@@ -158,7 +157,7 @@ addRows !r1 !r2 = V.unfoldr step (r1, r2) where
 -- representation.  Only non-zero terms are recorded, but for every
 -- non-zero term, all the exponents (even the zeroes) are kept.  This
 -- allows bulk evaluation of many polynomials, using the REPA library.
-data Poly s = Poly { cfs  :: !(Array U DIM1 (Fp s Int))
+data Poly s = Poly { cfs  :: !(Array U DIM1 (Fp s Int64))
                    -- ^ The non-zero coefficients.
                    , exps :: !(Array U DIM2 Word8)
                    -- ^ The exponents. The first index is aligned with
@@ -167,10 +166,10 @@ data Poly s = Poly { cfs  :: !(Array U DIM1 (Fp s Int))
                    } deriving (Eq, Show)
 
 -- | Evaluation of a multivariate polynomial.
-multiEval :: forall s . Reifies s Int
-  => Array U DIM1 (Fp s Int)
+multiEval :: forall s . Reifies s Int64
+  => Array U DIM1 (Fp s Int64)
   -> Poly s
-  -> Fp s Int
+  -> Fp s Int64
 multiEval !xs !p =
   let (i:._) = extent (exps p)
       xs' = extend (i:.All) xs
@@ -180,17 +179,17 @@ multiEval !xs !p =
   in foldAllS (+) 0 terms
 
 -- | Evaluate many polynomials simultaneously, calculating the powers only once.
-multiEvalBulk :: forall s . Reifies s Int
-  => Array U DIM1 (Fp s Int)
+multiEvalBulk :: forall s . Reifies s Int64
+  => Array U DIM1 (Fp s Int64)
   -> BV.Vector (Poly s)
-  -> V.Vector (Fp s Int)
+  -> V.Vector (Fp s Int64)
 multiEvalBulk !xs !ps = V.convert (BV.map evalPoly ps)
   where
-    evalPoly :: Poly s -> Fp s Int
+    evalPoly :: Poly s -> Fp s Int64
     evalPoly p = let monomials = R.foldS (*) 1 (evalTerms (delay $ exps p))
                      terms = R.zipWith (*) (cfs p) monomials
                  in foldAllS (+) 0 terms
-    evalTerms :: Array R.D DIM2 Word8 -> Array R.D DIM2 (Fp s Int)
+    evalTerms :: Array R.D DIM2 Word8 -> Array R.D DIM2 (Fp s Int64)
     evalTerms ts = R.traverse ts id (\ getElt ix@(Z:._:.i :: DIM2) -> (powers BV.! i) V.! fromIntegral (getElt ix))
     powers = BV.zipWith generatePowers
              (BV.convert (R.toUnboxed (maxPowers (concatTerms (BV.map (R.delay . exps) ps)))))
@@ -199,7 +198,7 @@ multiEvalBulk !xs !ps = V.convert (BV.map evalPoly ps)
     maxPowers = R.foldS max 0 . R.transpose
     concatTerms :: BV.Vector (Array R.D DIM2 Word8) -> Array R.D DIM2 Word8
     concatTerms =  R.transpose . BV.foldl1' R.append . BV.map R.transpose
-    generatePowers :: Word8 -> Fp s Int -> V.Vector (Fp s Int)
+    generatePowers :: Word8 -> Fp s Int64 -> V.Vector (Fp s Int64)
     generatePowers n x = V.iterateN (fromIntegral n+1) (*x) 1
 
 -- | Extended Euklid's Algorithm

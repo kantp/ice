@@ -33,6 +33,7 @@ import qualified Data.Vector.Unboxed as V
 import           Data.Word (Word8)
 import           Ice.Fp
 import           Ice.Types
+import Data.Int (Int64)
 
 -- | Given an association list of invariant names, parse an expression
 -- of the form @x^n@ and yield a pair @(i,n)@, where @i@ is the key of
@@ -45,7 +46,7 @@ power xs = do
   return (coeff, expo)
 
 -- | As 'power', but evaluating on the fly.
-evaldPower :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
+evaldPower :: Reifies s Int64 => [(Fp s Int64, B.ByteString)] -> Parser (Fp s Int64)
 evaldPower xs = do
   coeff <- asum (map stringInd xs)
   expo <- option 1 $ char '^' *> (decimal :: Parser Int)
@@ -70,7 +71,7 @@ term xs = do
   return $! Term cf expos
 
 -- | As 'term', but evaluates the term.
-evaldTerm :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
+evaldTerm :: Reifies s Int64 => [(Fp s Int64, B.ByteString)] -> Parser (Fp s Int64)
 evaldTerm xs = do
   cf <- coefficient
   factors <- sepBy' (evaldPower xs) (char '*')
@@ -104,7 +105,7 @@ ibpLine intName xs = line getPoly intName
     getPoly = collectTerms (length xs) <$> manyTill' (term xs) (skipSpace >> char ')' >> endOfLine)
 
 -- | As 'ibpLine', but evaluates the coefficient polynomial.
-evaldIbpLine :: Reifies s Int => B.ByteString -> [(Fp s Int, B.ByteString)] -> Parser (IbpLine (Fp s Int))
+evaldIbpLine :: Reifies s Int64 => B.ByteString -> [(Fp s Int64, B.ByteString)] -> Parser (IbpLine (Fp s Int64))
 evaldIbpLine intName xs = line getPoly intName
   where
     getPoly = foldl' (+) 0 <$>
@@ -140,12 +141,12 @@ ibp intName xs = do
 -- all equations in unevaluated form in memory.  This is used unless
 -- the system of equations will be evaluated at different random
 -- points.
-evaldIbp :: Reifies s Int
+evaldIbp :: Reifies s Int64
          => B.ByteString
          -- ^ The symbol used in the input to denote Feynman Integrals.
-         -> [(Fp s Int, B.ByteString)]
+         -> [(Fp s Int64, B.ByteString)]
          -- ^ A list of the variables values and names used in the input.
-         -> Parser (Ibp (Fp s Int))
+         -> Parser (Ibp (Fp s Int64))
 evaldIbp intName xs = do
   !lines <- manyTill' (evaldIbpLine intName xs) (char ';')
   skipSpace

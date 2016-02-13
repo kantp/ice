@@ -34,9 +34,10 @@ import           Ice.ParseIbp
 import           Ice.Types
 import           System.Console.CmdArgs
 import           System.IO
+import Data.Int (Int64)
 
 -- | A list of pre-generated prime numbers such that the square just fits into a 64bit Integer.
-pList :: [Int]
+pList :: [Int64]
 pList = [3036998333,3036998347,3036998381,3036998401,3036998429,3036998449,3036998477
         ,3036998537,3036998561,3036998563,3036998567,3036998599,3036998611,3036998717
         ,3036998743,3036998759,3036998761,3036998777,3036998803,3036998837,3036998843
@@ -55,7 +56,7 @@ pList = [3036998333,3036998347,3036998381,3036998401,3036998429,3036998449,30369
 
 -- | Given the supposed rank of the system and the prime number used,
 -- calculate an upper bound on the probability of failure.
-getBound :: Int -> Int -> Double
+getBound :: Int64 -> Int64 -> Double
 getBound r p = 1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..r]]
 
 -- | Determine which integrals appear in a certain equation.
@@ -89,15 +90,15 @@ lookupInPair offset k (m1, m2) =
     x -> x
 
 -- | Inject a concrete value for the prime number used as modulus in backwards elimination.
-unwrapBackGauss :: Int -> (forall s . Reifies s Int => (Fp s Int, [V.Vector (Int, Fp s Int)])) -> [V.Vector (Int, Int)]
+unwrapBackGauss :: Int64 -> (forall s . Reifies s Int64 => (Fp s Int64, [V.Vector (Int, Fp s Int64)])) -> [V.Vector (Int, Int64)]
 unwrapBackGauss p rs =
-  let (_, res) =  reify p (\ (_ :: Proxy s) -> (unFp *** map (V.map (second unFp))) (rs :: (Fp s Int, [V.Vector (Int, Fp s Int)])))
+  let (_, res) =  reify p (\ (_ :: Proxy s) -> (unFp *** map (V.map (second unFp))) (rs :: (Fp s Int64, [V.Vector (Int, Fp s Int64)])))
   in res
 
 -- | Backwards Gaussian elimination.
-backGauss :: forall s . Reifies s Int
-             => ([V.Vector (Int, Fp s Int)], [Row s])
-             -> (Fp s Int, [V.Vector (Int, Fp s Int)])
+backGauss :: forall s . Reifies s Int64
+             => ([Row s], [Row s])
+             -> (Fp s Int64, [Row s])
 backGauss (!rsDone, []) = (1, rsDone)
 backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (pivotRow:rsDone, rs')
   where
@@ -118,14 +119,14 @@ partitionEqs is rs = first reverse . (map snd *** map snd) $ foldl' step ([], rs
       where ([eq], dep') = partition ((==i) . fst) dep
 
 -- | This is one step in the forward elimination.
-probeStep :: forall s . Reifies s Int
+probeStep :: forall s . Reifies s Int64
              => ([Row s], RowTree s)
-             -> Fp s Int
+             -> Fp s Int64
              -> [Int]
              -> [Int]
-             -> (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int)
+             -> EliminationResult s
 probeStep (!rsDone, !rs) !d !j !i
-  | Map.null rs = (p,rsDone, d, V.fromList . reverse $ j, V.fromList . reverse $ i)
+  | Map.null rs = EliminationResult p rsDone  d (V.fromList . reverse $ j) (V.fromList . reverse $ i)
   | otherwise =
     probeStep (rsDone', rows') d' j' i'
   where
@@ -149,14 +150,14 @@ probeStep (!rsDone, !rs) !d !j !i
 -- | This function solves multiple images of the original system, in
 -- order to reduce the bound on the probability of failure below the
 -- value specified by the --failbound option.
-iteratedForwardElim :: IceMonad (Int, [V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
+iteratedForwardElim :: IceMonad (Int64, [V.Vector (Int, Int64)], Int64, V.Vector Int, V.Vector Int)
 iteratedForwardElim = do
   PolynomialSystem eqs <- gets system
   goal <- asks failBound
   (p0, xs0) <- choosePoints
   let (!rs',_,!j,!i) = withMod' p0 $ testMatrixFwd xs0 eqs
       r0 = V.length i
-      bound0 = getBound r0 p0
+      bound0 = getBound (fromIntegral r0) p0
       showBound = tell' "The probability that too many equations were discarded is less than "
   showBound bound0
   if bound0 < goal
@@ -167,7 +168,7 @@ iteratedForwardElim = do
                let (_,_,_,i') = withMod' p $ testMatrixFwd xs eqs
                    r' = V.length i'
                    result = case compare (r,i) (r',i') of
-                     EQ -> Good (getBound r p)
+                     EQ -> Good (getBound (fromIntegral r) p)
                      LT -> Restart
                      GT -> Unlucky
                case result of
@@ -184,7 +185,7 @@ iteratedForwardElim = do
          in redoTest r0 bound0 splitRows
 
 -- | Choose a large prime and an evaluation point randomly.
-choosePoints :: IceMonad (Int, V.Vector Int)
+choosePoints :: IceMonad (Int64, V.Vector Int64)
 choosePoints = do
   nInvs <- asks (length . invariants)
   p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
@@ -194,8 +195,8 @@ choosePoints = do
   return (p, xs)
 
 -- | Evaluate the polynomials in the IBP equations.
-evalIbps :: forall s . Reifies s Int
-            => Array U DIM1 (Fp s Int)
+evalIbps :: forall s . Reifies s Int64
+            => Array U DIM1 (Fp s Int64)
             -> [Equation MPoly]
             -> BV.Vector (Row s)
 evalIbps xs rs = BV.fromList (map treatRow rs)  where
@@ -225,24 +226,24 @@ updateRowTree f rs =
   Map.mapWithKey (\ (_, n, t, i) r -> let r' = f r in ((fst (V.head r'), n+1, t, i), r')) rs
 
 -- | Perform a forward elimination.
-testMatrixFwd :: forall s . Reifies s Int
-                 => V.Vector Int
+testMatrixFwd :: forall s . Reifies s Int64
+                 => V.Vector Int64
                  -> [Equation MPoly]
-                 -> ([Row s], Fp s Int, V.Vector Int, V.Vector Int)
+                 -> ([Row s], Fp s Int64, V.Vector Int, V.Vector Int)
 testMatrixFwd xs rs = (rs',d,j,i) where
-  (_, rs', d, j, i) = probeStep ([],  buildRowTree m) 1 [] []
+  (EliminationResult _ rs' d j i) = probeStep ([],  buildRowTree m) 1 [] []
   m = evalIbps xs' rs
-  xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int))
-            
--- | Inject modulus to be used in the forward elimination.
-withMod :: Int -> (forall s . Reifies s Int => (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))
-           -> (Int, [V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
-withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: (Int, [Row s], Fp s Int, V.Vector Int, V.Vector Int))))
-  where symmetricRep' (p,rs,d,j,i) = (p,map (V.map (second unFp)) rs,unFp d,j,i)
+  xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int64))
 
-withMod' :: Int -> (forall s . Reifies s Int => ([Row s], Fp s Int, V.Vector Int, V.Vector Int))
-           -> ([V.Vector (Int, Int)], Int, V.Vector Int, V.Vector Int)
-withMod' m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int, V.Vector Int, V.Vector Int))))
+-- | Inject modulus to be used in the forward elimination.
+withMod :: Int64 -> (forall s . Reifies s Int64 => EliminationResult s)
+           -> (Int64, [V.Vector (Int, Int64)], Int64, V.Vector Int, V.Vector Int)
+withMod m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: EliminationResult s)))
+  where symmetricRep' (EliminationResult p rs d j i) = (p,map (V.map (second unFp)) rs, unFp d, j, i)
+
+withMod' :: Int64 -> (forall s . Reifies s Int64 => ([Row s], Fp s Int64, V.Vector Int, V.Vector Int))
+           -> ([V.Vector (Int, Int64)], Int64, V.Vector Int, V.Vector Int)
+withMod' m x = reify m (\ (_ :: Proxy s) -> (symmetricRep' (x :: ([Row s], Fp s Int64, V.Vector Int, V.Vector Int))))
   where symmetricRep' (rs,d,j,i) = (map (V.map (second unFp)) rs,unFp d,j,i)
 
 -- | Produce a bitmap that visualises how sparse a matrix is.
@@ -288,8 +289,8 @@ initialiseEquations = do
     input = if pipes c
                then sourceHandle stdin
                else sourceFile (inputFile c) :: Producer (ResourceT IO) B.ByteString
-    unwrap :: Int -> (forall s . Reifies s Int => IO [Ibp (Fp s Int)]) -> IO [Ibp Int]
-    unwrap p x = reify p (\ (_ :: Proxy s) -> liftM ((map . fmap) unFp) (x :: IO [Ibp (Fp s Int)]) )
+    unwrap :: Int64 -> (forall s . Reifies s Int64 => IO [Ibp (Fp s Int64)]) -> IO [Ibp Int64]
+    unwrap p x = reify p (\ (_ :: Proxy s) -> liftM ((map . fmap) unFp) (x :: IO [Ibp (Fp s Int64)]) )
   if failBound c > 0
     then do
          let invs = zip [0..] invNames
@@ -303,7 +304,7 @@ initialiseEquations = do
                  table
                 (Map.size (fst table) + Map.size (snd table)))
     else do
-         let parseAndEval :: Reifies s Int => V.Vector Int -> IO [Ibp (Fp s Int)]
+         let parseAndEval :: Reifies s Int64 => V.Vector Int64 -> IO [Ibp (Fp s Int64)]
              parseAndEval xs = runResourceT $
                input
                =$= conduitParser (evaldIbp (B.pack $ intName c) (zip (V.toList (V.map fromIntegral xs)) invNames))
@@ -363,7 +364,7 @@ performElimination = do
   tell' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
   when (visualize c) (writeSparsityBMP True (inputFile c ++ ".forward.bmp"))
                           
-eqsToRows :: forall s . Reifies s Int => [Equation Int] -> BV.Vector (Row s)
+eqsToRows :: forall s . Reifies s Int64 => [Equation Int64] -> BV.Vector (Row s)
 eqsToRows = BV.fromList . map (V.convert . BV.map (second fromIntegral))
 
 performBackElim :: IceMonad ()
