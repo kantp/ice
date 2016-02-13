@@ -8,15 +8,17 @@ module Main
        where
 
 import           Codec.BMP (BMP, packRGBA32ToBMP, writeBMP)
+import           Conduit
 import           Control.Arrow
 import           Control.Monad
-import           Control.Monad.Random
 import           Control.Monad.RWS
+import           Control.Monad.Random
 import qualified Data.Array.Repa as R
 import           Data.Array.Repa hiding (map, (++))
 import           Data.Attoparsec.ByteString
 import           Data.ByteString (pack)
 import qualified Data.ByteString.Char8 as B
+import           Data.Conduit.Attoparsec (conduitParser)
 import qualified Data.IntMap.Strict as IntMap
 import           Data.List
 import qualified Data.Map.Strict as Map
@@ -55,29 +57,6 @@ pList = [3036998333,3036998347,3036998381,3036998401,3036998429,3036998449,30369
 -- calculate an upper bound on the probability of failure.
 getBound :: Int -> Int -> Double
 getBound r p = 1 - product [1- (fromIntegral x / fromIntegral p) | x <- [1..r]]
-
--- driver for the parser.
-refill :: Handle -> IO B.ByteString
-refill h = B.hGet h (4*1024)
-
--- | Read equations from the handle until exhausted.
-readEquations :: Parser (Ibp a) -> Handle -> IO [Ibp a]
-readEquations parser h = go (0 :: Int) [] =<< refill h
-  where
-    go !n !acc !is = do
-      when (n > 0 && n `mod` 10000 == 0) ( hPutStr stderr "Parsed equations: "
-                                           >> (hPutStr stderr . show) n)
-      r <- parseWith (refill h) parser is
-      case r of
-        Fail _ _ msg -> error msg
-        Done bs x
-          | B.null bs -> do
-            s <- refill h
-            if B.null s
-              then return $! (x:acc)
-              else go (n+1) (x:acc) s
-          | otherwise -> go (n+1) (x:acc) bs
-        Partial _ -> error "Incomplete input."
 
 -- | Determine which integrals appear in a certain equation.
 getIntegrals :: Ibp a -> BV.Vector SInt
@@ -301,32 +280,35 @@ initialiseEquations = do
   c <- ask
   tell' "Configuration: " c
   let
-    parseAction p = do
-      eqs <- if pipes c then ($) p stdin
-             else withFile (inputFile c) ReadMode p
-      return $ reverse eqs
     invNames = map B.pack (invariants c)
     integrals eqs = 
         Map.partitionWithKey (\ k _ -> isBeyond c k)
         (Map.fromList $ concatMap (BV.toList . getIntegrals) eqs `zip` repeat ())
     processEqs table = map (ibpToRow table)
-    parseAndEval :: Reifies s Int => V.Vector Int -> IO [Ibp (Fp s Int)]
-    parseAndEval xs = do
-      let invs = zip (V.toList (V.map fromIntegral xs)) invNames
-          parser = readEquations (evaldIbp (B.pack $ intName c) invs)
-      parseAction parser
+    input = if pipes c
+               then sourceHandle stdin
+               else sourceFile (inputFile c) :: Producer (ResourceT IO) B.ByteString
     unwrap :: Int -> (forall s . Reifies s Int => IO [Ibp (Fp s Int)]) -> IO [Ibp Int]
     unwrap p x = reify p (\ (_ :: Proxy s) -> liftM ((map . fmap) unFp) (x :: IO [Ibp (Fp s Int)]) )
   if failBound c > 0
     then do
          let invs = zip [0..] invNames
-             parser = readEquations (ibp (B.pack $ intName c) invs)
-         equations <- liftIO $ parseAction parser
+         equations <- liftIO . runResourceT $
+                   input
+                   =$= conduitParser (ibp (B.pack $ intName c) invs)
+                   =$= mapC snd
+                   $$ sinkList
          let table = integrals equations
          put (StateData (PolynomialSystem $ processEqs table equations)
                  table
                 (Map.size (fst table) + Map.size (snd table)))
     else do
+         let parseAndEval :: Reifies s Int => V.Vector Int -> IO [Ibp (Fp s Int)]
+             parseAndEval xs = runResourceT $
+               input
+               =$= conduitParser (evaldIbp (B.pack $ intName c) (zip (V.toList (V.map fromIntegral xs)) invNames))
+               =$= mapC snd
+               $$ sinkList
          (p, xs) <- choosePoints
          equations <- liftIO $ unwrap p $ parseAndEval xs
          let table = integrals equations
