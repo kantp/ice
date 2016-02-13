@@ -1,13 +1,21 @@
+{-|
+Module: Ice.ParseIbp
+Description: Parser for Integratio-By-Parts equations.
+
+The system of equations can either be parsed as it is, or evaluating
+the coefficient polynomials on the fly.  Evaluating on the fly reduces
+memory usage, while keeping the coefficient polynomials allows
+multiple runs of the algorithm using different evaluation points (to
+reduce the probability that the algorithm finds a sub-optimal
+solution).
+-}
+
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
--- | Attoparsec-based parser for integration-by-parts equations.
---
--- We can either parse polynomials to a sparse representation, or
--- evaluate them on the fly.  The latter is done unless multiple
--- evaluations are needed, in order to save memory.
+
 module Ice.ParseIbp
        (ibp, evaldIbp)
        where
@@ -36,6 +44,7 @@ power xs = do
   expo <- option 1 $ char '^' *> decimal
   return (coeff, expo)
 
+-- | As 'power', but evaluating on the fly.
 evaldPower :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
 evaldPower xs = do
   coeff <- asum (map stringInd xs)
@@ -60,6 +69,7 @@ term xs = do
   let expos = V.generate (length xs) (\i -> fromMaybe 0 $ lookup i factors)
   return $! Term cf expos
 
+-- | As 'term', but evaluates the term.
 evaldTerm :: Reifies s Int => [(Fp s Int, B.ByteString)] -> Parser (Fp s Int)
 evaldTerm xs = do
   cf <- coefficient
@@ -89,40 +99,54 @@ collectTerms !nVars !ts =
 -- | Parse one line containing one integral and a polynomial that is
 -- the coefficient of this integral in the equation.
 ibpLine :: B.ByteString -> [(Int, B.ByteString)] -> Parser (IbpLine MPoly)
-ibpLine intName xs = do
-  inds <- indices intName
-  skipSpace
-  char '*'
-  skipSpace
-  char '('
-  skipSpace
-  poly <- manyTill' (term xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
-  let poly' = collectTerms (length xs) poly
-  return $ IbpLine (SInt inds) poly'
+ibpLine intName xs = line getPoly intName
+  where
+    getPoly = collectTerms (length xs) <$> manyTill' (term xs) (skipSpace >> char ')' >> endOfLine)
 
+-- | As 'ibpLine', but evaluates the coefficient polynomial.
 evaldIbpLine :: Reifies s Int => B.ByteString -> [(Fp s Int, B.ByteString)] -> Parser (IbpLine (Fp s Int))
-evaldIbpLine intName xs = do
+evaldIbpLine intName xs = line getPoly intName
+  where
+    getPoly = foldl' (+) 0 <$>
+              manyTill' (evaldTerm xs) (skipSpace >> char ')' >> endOfLine)
+
+line :: Parser a
+     -> B.ByteString
+     -> Parser (IbpLine a)
+line getPoly intName = do
   inds <- indices intName
   skipSpace
   char '*'
   skipSpace
   char '('
   skipSpace
-  poly <- manyTill' (evaldTerm xs) (skipSpace >> char ')' >> endOfLine) -- (char '\n')
-  let poly' = foldl' (+) 0 poly
-  return $ IbpLine (SInt inds) poly'
+  poly <- getPoly
+  return $ IbpLine (SInt inds) poly
 
 -- | Parse one equation.  An equation consists of one or more
 -- 'ibpLine's, terminated by a semicolon (on a separate line).
-ibp :: B.ByteString -> [(Int, B.ByteString)] -> Parser (Ibp MPoly)
+ibp :: B.ByteString
+    -- ^ The symbol used in the input to denote Feynman Integrals.
+    -> [(Int, B.ByteString)]
+    -- ^ A list of the variable numbers and names used in the input.
+   -> Parser (Ibp MPoly)
 ibp intName xs = do
   !lines <- manyTill' (ibpLine intName xs) (char ';')
   skipSpace
   return $! Ibp (BV.force $ BV.fromList lines)
 
-evaldIbp :: Reifies s Int => B.ByteString -> [(Fp s Int, B.ByteString)] -> Parser (Ibp (Fp s Int))
+-- | Parse an equation, and evaluate the coefficient polynomials on
+-- the fly.  This way, we can save some memory, since we never have
+-- all equations in unevaluated form in memory.  This is used unless
+-- the system of equations will be evaluated at different random
+-- points.
+evaldIbp :: Reifies s Int
+         => B.ByteString
+         -- ^ The symbol used in the input to denote Feynman Integrals.
+         -> [(Fp s Int, B.ByteString)]
+         -- ^ A list of the variables values and names used in the input.
+         -> Parser (Ibp (Fp s Int))
 evaldIbp intName xs = do
   !lines <- manyTill' (evaldIbpLine intName xs) (char ';')
   skipSpace
   return $! Ibp (BV.force $ BV.fromList lines)
-
