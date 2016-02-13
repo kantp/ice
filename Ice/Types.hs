@@ -21,6 +21,8 @@ module Ice.Types
        -- * Systems of linear equations
        , Equation
        , LinSystem (..), sparsityPattern, nEq, selectRows
+       , RowKey (..), RowTree
+       , buildRowTree, updateRowTree
        -- * Result of a Monte Carlo run
        , TestResult (..)
        , EliminationResult (..)
@@ -102,6 +104,40 @@ data LinSystem = PolynomialSystem [Equation MPoly]
                           , image              :: [V.Vector (Int, Int64)]
                           , rowNumbers         :: [Int]
                           , pivotColumnNumbers :: V.Vector Int} deriving Show
+
+-- | During forward elimination, we keep the equations in a sorted
+-- tree.  This has the advantage that it is easy to find the next
+-- pivot row, find all rows that will be modified in the next step,
+-- and reinsert the modified equations.
+--
+-- Equations are ordered with the following priority:
+--
+-- - column index of first non-zero entry
+-- - number of times this equations has been modified
+-- - number of terms originally in the equation
+-- - original row number
+data RowKey = RowKey { _kCol   :: {-# UNPACK #-} !Int
+                     , _kMod   :: {-# UNPACK #-} !Int
+                     , _KTerms :: {-# UNPACK #-} !Int
+                     , _kRow   :: {-# UNPACK #-} !Int
+                     }
+  deriving (Ord, Eq)
+
+type RowTree s = Map.Map RowKey (Row s)
+buildRowTree :: BV.Vector (Row s) -> RowTree s
+buildRowTree = Map.fromList . BV.toList
+               . BV.filter (not . V.null . snd)
+               . BV.imap (\ i r -> ((RowKey (fst (V.head r)) 0 (V.length r) i), r))
+
+updateRowTree :: (Row s -> Row s) -> RowTree s -> [(RowKey, Row s)]
+{-# INLINE updateRowTree #-}
+updateRowTree f rs =
+  Map.elems . Map.filter (not . V.null . snd)  $
+  Map.mapWithKey (\ (RowKey _ n t i) r ->
+                    let !r' = f r
+                        k = RowKey (fst (V.head r')) (n+1) t i
+                    in (k, r')) rs
+
 
 -- | Count the number of equations in a linear system.
 nEq :: LinSystem -> Int

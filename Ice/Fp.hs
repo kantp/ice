@@ -133,6 +133,7 @@ addRows :: Reifies s Int64
           => V.Vector (Int, Fp s Int64)
           -> V.Vector (Int, Fp s Int64)
           -> V.Vector (Int, Fp s Int64)
+{-# INLINE addRows #-}
 addRows !r1 !r2 = V.unfoldr step (r1, r2) where
   step (!x, !y)
     | V.null x && V.null y = Nothing -- We're done.

@@ -107,7 +107,7 @@ backGauss (!rsDone, !pivotRow:(!rs)) = backGauss (pivotRow:rsDone, rs')
     pivotOperation row = case V.find ((==pivotColumn) . fst) row of
       Nothing -> row
       Just (_, elt) -> addRows (multRow (-elt*invPivot) pivotRow) row
-      
+
 -- | split equations into linearly independent and linealy dependent
 -- ones (given the list i of linearly independent equations),
 -- preserving the permutation.
@@ -120,29 +120,31 @@ partitionEqs is rs = first reverse . (map snd *** map snd) $ foldl' step ([], rs
 
 -- | This is one step in the forward elimination.
 probeStep :: forall s . Reifies s Int64
-             => ([Row s], RowTree s)
+             => [Row s]
+             -> RowTree s
              -> Fp s Int64
              -> [Int]
              -> [Int]
              -> EliminationResult s
-probeStep (!rsDone, !rs) !d !j !i
+probeStep !rsDone !rs !d !j !i
   | Map.null rs = EliminationResult p rsDone  d (V.fromList . reverse $ j) (V.fromList . reverse $ i)
   | otherwise =
-    probeStep (rsDone', rows') d' j' i'
+    probeStep rsDone' rows' d' j' i'
   where
     (pivotRow, otherRows) = Map.deleteFindMin rs
-    (_,_,_,pivotRowNumber) = fst pivotRow
+    (RowKey _ _ _ pivotRowNumber) = fst pivotRow
     (pivotColumn, pivotElement) = (V.head . snd) pivotRow
-    (rowsToModify, ignoreRows) = Map.split (pivotColumn+1, 0, 0, 0) otherRows
+
+    (rowsToModify, ignoreRows) = Map.split (RowKey (pivotColumn+1) 0 0 0) otherRows
     invPivotElement = recip pivotElement
-    normalisedPivotRow = second (multRow invPivotElement) pivotRow
+    !normalisedPivotRow = second (multRow invPivotElement) pivotRow
     d' = d * pivotElement
     j' = pivotColumn:j
-    pivotOperation row =
+    pivotOperation !row =
       let (_,x) = V.head row
       in addRows (multRow (-x) (snd normalisedPivotRow)) row
     modifiedRows = updateRowTree pivotOperation rowsToModify
-    rows' = modifiedRows `Map.union` ignoreRows
+    rows' = foldl' (\ m (k, v) -> Map.insert k v m) ignoreRows modifiedRows
     i' = pivotRowNumber:i
     rsDone' = snd normalisedPivotRow:rsDone
     p = getModulus d
@@ -202,28 +204,8 @@ evalIbps :: forall s . Reifies s Int64
 evalIbps xs rs = BV.fromList (map treatRow rs)  where
   {-# INLINE toPoly #-}
   toPoly (MPoly (cs, es)) = Poly (R.fromUnboxed (Z :. BV.length cs) $ (V.convert . BV.map fromInteger) cs) es
-  treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r)) 
+  treatRow r = V.filter ((/=0) . snd) $ V.zip (V.convert (BV.map fst r)) (multiEvalBulk xs (BV.map (toPoly . snd) r))
 
--- | During forward elimination, we keep the equations in a sorted
--- tree.  This has the advantage that it is easy to find the next
--- pivot row, find all rows that will be modified in the next step,
--- and reinsert the modified equations.
---   
--- Equations are ordered with the following priority:
---
--- - column index of first non-zero entry
--- - number of times this equations has been modified
--- - number of terms originally in the equation
--- - original row number
-type RowTree s = Map.Map (Int, Int, Int, Int) (Row s)
-buildRowTree :: BV.Vector (Row s) -> RowTree s
-buildRowTree = Map.fromList . BV.toList
-               . BV.filter (not . V.null . snd)
-               . BV.imap (\ i r -> ((fst (V.head r), 0, V.length r, i), r))
-updateRowTree :: (Row s -> Row s) -> RowTree s -> RowTree s
-updateRowTree f rs =
-  Map.fromList . Map.elems . Map.filter (not . V.null . snd)  $
-  Map.mapWithKey (\ (_, n, t, i) r -> let r' = f r in ((fst (V.head r'), n+1, t, i), r')) rs
 
 -- | Perform a forward elimination.
 testMatrixFwd :: forall s . Reifies s Int64
@@ -231,7 +213,7 @@ testMatrixFwd :: forall s . Reifies s Int64
                  -> [Equation MPoly]
                  -> ([Row s], Fp s Int64, V.Vector Int, V.Vector Int)
 testMatrixFwd xs rs = (rs',d,j,i) where
-  (EliminationResult _ rs' d j i) = probeStep ([],  buildRowTree m) 1 [] []
+  (EliminationResult _ rs' d j i) = probeStep [] (buildRowTree m) 1 [] []
   m = evalIbps xs' rs
   xs' = fromUnboxed (Z :. V.length xs) (V.map normalise xs :: V.Vector (Fp s Int64))
 
@@ -282,7 +264,7 @@ initialiseEquations = do
   tell' "Configuration: " c
   let
     invNames = map B.pack (invariants c)
-    integrals eqs = 
+    integrals eqs =
         Map.partitionWithKey (\ k _ -> isBeyond c k)
         (Map.fromList $ concatMap (BV.toList . getIntegrals) eqs `zip` repeat ())
     processEqs table = map (ibpToRow table)
@@ -336,7 +318,7 @@ performElimination = do
   s <- gets system
   c <- ask
   (p, rs', _, j, i) <-  case s of
-        FpSystem p _ rs -> return $ withMod p $ probeStep ([], buildRowTree (eqsToRows rs)) 1 [] []
+        FpSystem p _ rs -> return $ withMod p $ probeStep [] (buildRowTree (eqsToRows rs)) 1 [] []
         PolynomialSystem _ -> iteratedForwardElim
         FpSolved _ _ _ _ -> error "Internal error: tried solving a solved system. Please report this as a bug."
   let i' = (if sortList c then sort else id) (V.toList i)
@@ -363,7 +345,7 @@ performElimination = do
   endTime <- liftIO getCurrentTime
   tell' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
   when (visualize c) (writeSparsityBMP True (inputFile c ++ ".forward.bmp"))
-                          
+
 eqsToRows :: forall s . Reifies s Int64 => [Equation Int64] -> BV.Vector (Row s)
 eqsToRows = BV.fromList . map (V.convert . BV.map (second fromIntegral))
 
