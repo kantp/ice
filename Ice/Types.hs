@@ -1,3 +1,7 @@
+{-|
+Module: Ice.Types
+Description: data type declarations used in Ice.
+-}
 {-# LANGUAGE BangPatterns              #-}
 {-# LANGUAGE DeriveDataTypeable        #-}
 {-# LANGUAGE DeriveFunctor             #-}
@@ -7,7 +11,21 @@
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE TypeSynonymInstances      #-}
 module Ice.Types
-
+       (
+       -- * Configuration of the program
+       Config (..), config
+       -- * Feynman integrals, terms, polynomials, equations
+       , SInt (..), isBeyond
+       , Term (..), MPoly (..)
+       , IbpLine (..), Ibp (..)
+       -- * Systems of linear equations
+       , Equation
+       , LinSystem (..), sparsityPattern, nEq, selectRows
+       -- * Result of a Monte Carlo run
+       , TestResult (..)
+       -- * Monad in which the program runs
+       , IceMonad, StateData (..)
+       )
 where
 
 import           Control.Monad.RWS
@@ -66,6 +84,9 @@ data StateData = StateData { system       :: LinSystem
 -- | State Monad of Ice.
 type IceMonad a = RWST Config String StateData IO a
 
+-- | A single line in a system of equations
+type Equation a = BV.Vector (Int, a)
+
 -- | A linear system can either be a system with polynomial entries,
 -- an image under evaluation modulo a prime, or a solution of an
 -- image.
@@ -113,22 +134,18 @@ instance Ord SInt where
     laportaOrdering :: V.Vector Int -> V.Vector Int -> Ordering
     laportaOrdering =
       comparing (V.length . V.filter (>0)) -- number of propagators.
-      `mappend` comparing (numDots . SInt) -- total number of dots.
-      `mappend` comparing (numSPs . SInt) -- total number of scalar products.
-      `mappend` compareMissingProps -- comapre which propagators are present/absent.
-      `mappend` comparePropPowers -- compare powers of individual propagators.
-      `mappend` compareSpPowers -- compare powers of individual scalar products.
+      <> comparing numDots -- total number of dots.
+      <> comparing numSPs -- total number of scalar products.
+      <> compareMissingProps -- comapre which propagators are present/absent.
+      <> comparePropPowers -- compare powers of individual propagators.
+      <> compareSpPowers -- compare powers of individual scalar products.
     compareMissingProps xs ys = mconcat (zipWith (\ a b -> compare (signum (max a 0)) (signum (max b 0))) (V.toList ys) (V.toList xs))
     comparePropPowers xs ys = mconcat (zipWith (\ a b -> compare (max a 0) (max b 0)) (V.toList xs) (V.toList ys))
     compareSpPowers xs ys = mconcat (zipWith (\ a b -> compare (max (- a) 0) (max (- b) 0)) (V.toList xs) (V.toList ys))
-
--- | The total number of dots of an integral.
-numDots :: SInt -> Int
-numDots (SInt xs) = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
-
--- | The total number of scalar products of an integral.
-numSPs :: SInt -> Int
-numSPs (SInt xs) = - (V.sum . V.filter (<0) $ xs)
+    -- The total number of dots of an integral.
+    numDots = V.sum . V.map (+ (-1)) . V.filter (>0)
+    -- The total number of scalar products of an integral.
+    numSPs xs = - (V.sum . V.filter (<0) $ xs)
 
 -- | Check whether an integral has more dots and/or scalar products
 -- than allowed.
@@ -138,7 +155,7 @@ isBeyond c (SInt xs) = r > rMax c || s > sMax c
     r = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
     s = - (V.sum . V.filter (<0) $ xs)
 
---  | One term in a polynomial in the kinematic invariants and d
+-- | One term in a polynomial in the kinematic invariants and d
 data Term = Term !Integer !(V.Vector Word8) deriving Show
 -- | One term in an IBP equation.
 data IbpLine a = IbpLine !SInt !a deriving (Show, Functor)
@@ -157,8 +174,6 @@ instance Num MPoly where
   signum =      error "signum not implemented for multivariate polynomials."
   fromInteger = error "fromInteger not implemented for multivariate polynomials."
   abs =         error "abs not implemented for multivariate polynomials."
-
-type Equation a = BV.Vector (Int, a)
 
 -- | Result of successive Monte Carlo runs.
 data TestResult = Unlucky -- ^ We have hit a bad evaluation point and have to discard the result of this run.
