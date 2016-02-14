@@ -63,6 +63,7 @@ data Config = Config { inputFile  :: FilePath
                      , visualize  :: Bool
                      , failBound  :: Double
                      , pipes      :: Bool
+                     , ekgPort    :: Maybe Int
                      } deriving (Show, Data, Typeable)
 
 -- | Default values of configuration.
@@ -78,7 +79,8 @@ config = Config { inputFile = def &= args &= typ "FILE"
                 , sMax = def &= name "s" &= help "Maximal number of scalar products expected to be reduced."
                 , visualize = False &= help "Draw images of the sparsity pattern of original, reduced, and solved matrices."
                 , failBound = 1 &= help "Repeat forward elimination to decrease probability of failure below this."
-                , pipes = False &= name "p" &= help "use stdin and stdout for communication instead of files."}
+                , pipes = False &= name "p" &= help "use stdin and stdout for communication instead of files."
+                , ekgPort = Nothing &= help "specify a port for resource monitoring. A webserver will be available at http://localhost/<ekgPort>, showing you how much resources Ice uses."}
          &= summary "ICE -- Integration-By-Parts Chooser of Equations"
          &= details [ "Given a list of Integration-by-parts equations, ICE chooses"
                     , "a maximal linearly independent subset."]

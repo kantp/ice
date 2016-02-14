@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Main
        (main)
        where
@@ -30,6 +31,7 @@ import           Ice.ParseIbp
 import           Ice.Types
 import           System.Console.CmdArgs
 import           System.IO
+import           System.Remote.Monitoring
 
 -- | Determine which integrals appear in a certain equation.
 getIntegrals :: Ibp a -> BV.Vector SInt
@@ -214,4 +216,5 @@ main :: IO ()
 main = do
   c <- cmdArgs config
   initLog c
+  mapM_ (forkServer "localhost") (ekgPort c)
   void $ runRWST ice c undefined
