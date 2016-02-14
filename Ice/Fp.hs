@@ -134,17 +134,54 @@ addRows :: Reifies s Int64
           -> V.Vector (Int, Fp s Int64)
           -> V.Vector (Int, Fp s Int64)
 {-# INLINE addRows #-}
-addRows !r1 !r2 = V.unfoldr step (r1, r2) where
+-- In order to add two sparse rows, we have to traverse both from head
+-- to end, comparing the leading indices of both rows as we go.  If
+-- they are different, we have to pick the smaller one as the next
+-- non-zero entry in the resulting row.  If they are the same, we have
+-- to add both, and take their sum as the next entry (unless the sum
+-- is zero).  The implementation for this looks as follows:
+--
+-- addRows !r1 !r2 = V.unfoldr step (r1, r2) where
+--   step (!x, !y)
+--     | V.null x && V.null y = Nothing -- We're done.
+--     | V.null x = -- The first row has no more entries, we just need to
+--                  -- traverse the second row.  Note that the calls to
+--                  -- unsafeHead and unsafeTail below are all safe,
+--                  -- since we checked that the vectors are non-empty.
+--       Just (V.unsafeHead y, (x, V.unsafeTail y))
+--     | V.null y = -- As above, with first and second row replaced.
+--       Just (V.unsafeHead x, (V.unsafeTail x, y))
+--     | otherwise = -- The interesting case: both rows have elements left.
+--       let (!xi, !xval) = V.unsafeHead x
+--           (!yi, !yval) = V.unsafeHead y
+--       in case compare xi yi of
+--         LT -> Just ((xi, xval), (V.unsafeTail x, y))
+--         GT -> Just ((yi, yval), (x, V.unsafeTail y))
+--         EQ -> case xval + yval of
+--           0 -> step (V.unsafeTail x, V.unsafeTail y)
+--           val -> Just ((xi, val), (V.unsafeTail x, V.unsafeTail y))
+--
+-- However, we can optimise this.  In the above code, when we have
+-- reached the end of the first row, we still traverse the second one,
+-- copying each element to the resulting row, which is not optimal.
+-- Instead, we should stop at this point, and just concatenate the
+-- rest of the second row.  This is done in the implementation below.
+-- Because we do *a lot* of row additions, this is a huge gain in
+-- speed.
+addRows !r1 !r2 =
+  let start = V.unfoldr step (r1, r2)
+  in if V.null start
+     then start
+     else case V.unsafeLast start of
+            (-1, n) -> (V.unsafeInit start) V.++ (V.unsafeDrop (V.length r1 - fromIntegral (unFp n)) r1)
+            (-2, n) -> (V.unsafeInit start) V.++ (V.unsafeDrop (V.length r2 - fromIntegral (unFp n)) r2)
+            _ -> start
+  where
   step (!x, !y)
-    | V.null x && V.null y = Nothing -- We're done.
-    | V.null x = -- The first row has no more entries, we just need to
-                 -- traverse the second row.  Note that the calls to
-                 -- unsafeHead and unsafeTail below are all safe,
-                 -- since we checked that the vectors are non-empty.
-      Just (V.unsafeHead y, (x, V.unsafeTail y))
-    | V.null y = -- As above, with first and second row replaced.
-      Just (V.unsafeHead x, (V.unsafeTail x, y))
-    | otherwise = -- The interesting case: both rows have elements left.
+    | V.null x && V.null y = Nothing
+    | V.null x = Just ((-2, Fp . fromIntegral $ V.length y), (V.empty, V.empty))
+    | V.null y = Just ((-1, Fp . fromIntegral $ V.length x), (V.empty, V.empty))
+    | otherwise =
       let (!xi, !xval) = V.unsafeHead x
           (!yi, !yval) = V.unsafeHead y
       in case compare xi yi of
