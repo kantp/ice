@@ -38,6 +38,7 @@ cabal-version:       >=1.8
 executable ice
   main-is:             ice.hs
   other-modules:       Ice.Fp
+                     , Ice.Gauss
                      , Ice.ParseIbp
                      , Ice.Types
   ghc-options: -rtsopts -O2 -funbox-strict-fields
