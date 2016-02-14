@@ -28,21 +28,26 @@ module Ice.Types
        , EliminationResult (..)
        -- * Monad in which the program runs
        , IceMonad, StateData (..)
+       -- * logging
+       , initLog, info, info'
        )
 where
 
 import           Control.Monad.RWS
-import qualified Data.Array.Repa        as R
-import           Data.Int               (Int64)
-import           Data.List              (intercalate)
-import qualified Data.Map.Strict        as Map
+import qualified Data.Array.Repa           as R
+import           Data.Int                  (Int64)
+import           Data.List                 (intercalate)
+import qualified Data.Map.Strict           as Map
 import           Data.Ord
-import           Data.Reflection
-import qualified Data.Vector            as BV
-import qualified Data.Vector.Unboxed    as V
-import           Data.Word              (Word8)
+import qualified Data.Vector               as BV
+import qualified Data.Vector.Unboxed       as V
+import           Data.Word                 (Word8)
 import           Ice.Fp
 import           System.Console.CmdArgs
+import           System.Log.Formatter
+import           System.Log.Handler        (setFormatter)
+import           System.Log.Handler.Simple
+import           System.Log.Logger
 
 
 -- | Configuration via cmdargs library.
@@ -88,7 +93,7 @@ data StateData = StateData { system       :: LinSystem
                            } deriving Show
 
 -- | State Monad of Ice.
-type IceMonad a = RWST Config String StateData IO a
+type IceMonad a = RWST Config () StateData IO a
 
 -- | A single line in a system of equations
 type Equation a = BV.Vector (Int, a)
@@ -233,3 +238,20 @@ data EliminationResult s = EliminationResult
   , pivotRows    :: !(V.Vector Int)
   -- ^ rows of pivot elements
   }
+
+-- | Initialise the logger
+initLog :: Config -> IO ()
+initLog c = do
+  h <- fileHandler (logFile c) INFO >>= \lh -> return $
+        setFormatter lh (simpleLogFormatter "[$time] $msg")
+  updateGlobalLogger rootLoggerName removeHandler
+  updateGlobalLogger "ice" (addHandler h)
+  updateGlobalLogger "ice" (setLevel INFO)
+
+-- | Print information to the logfile
+info :: String -> IceMonad ()
+info = liftIO . infoM "ice"
+
+-- | Log a message from a string and something with a 'Show' instance.
+info' :: (Show a) => String -> a -> IceMonad ()
+info' x y = info (x ++ show y ++ "\n")

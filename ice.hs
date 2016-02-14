@@ -98,7 +98,7 @@ initialiseEquations :: IceMonad ()
 initialiseEquations = do
   startTime <- liftIO getCurrentTime
   c <- ask
-  tell' "Configuration: " c
+  info' "Configuration: " c
   let
     invNames = map B.pack (invariants c)
     integrals eqs =
@@ -138,24 +138,22 @@ initialiseEquations = do
   s <- get
   endTime <- liftIO getCurrentTime
   nInner <- liftM (Map.size . snd) $ gets integralMaps
-  tell' "Number of equations: " (nEq . system $ s)
-  tell' "Number of integrals: " (nIntegrals s)
-  tell (concat ["Number of integrals within r="
+  info' "Number of equations: " (nEq . system $ s)
+  info' "Number of integrals: " (nIntegrals s)
+  info (concat ["Number of integrals within r="
                , show (rMax c), ", s=", show (sMax c)
                , ": ", show nInner])
-  tell' "Wall time needed for reading and preparing equations: " (diffUTCTime endTime startTime)
+  info' "Wall time needed for reading and preparing equations: " (diffUTCTime endTime startTime)
   when (visualize c) (writeSparsityBMP False (inputFile c ++ ".bmp"))
 
-tell' :: (Show a, MonadWriter String m) => String -> a -> m ()
-tell' x y = tell (x ++ show y ++ "\n")
 
 printForwardResults :: IceMonad ()
 printForwardResults = do
   independentEqs <- gets (rowNumbers . system)
   c <- ask
   -- list indices of linearly independent equations
-  tell' "Number of linearly independent equations: " (length independentEqs)
-  tell' "Linearly independent equations: " independentEqs
+  info' "Number of linearly independent equations: " (length independentEqs)
+  info' "Linearly independent equations: " independentEqs
   when (pipes c) (liftIO $ mapM_ print independentEqs)
   when (dumpFile c /= "") $
     liftIO $ withFile (dumpFile c) WriteMode (\ h -> mapM_ (hPrint h) independentEqs)
@@ -171,9 +169,9 @@ printForwardResults = do
                              (integralNumber nOuterIntegrals k imaps)
                    in V.elem n j)
           innerIntegralMap
-  tell' "Integrals that can be reduced with these equations:"
+  info' "Integrals that can be reduced with these equations:"
     (map fst (Map.toList reducibleIntegrals))
-  tell' "Possible Master Integrals:"
+  info' "Possible Master Integrals:"
     (map fst (Map.toList irreducibleIntegrals))
   when (visualize c) $ -- print pattern after forward elimination
     writeSparsityBMP True (inputFile c ++ ".forward.bmp")
@@ -184,8 +182,8 @@ printBackResults = do
   c <- ask
   rs <- gets (image . system)
   when (visualize c) (writeSparsityBMP False (inputFile c ++ ".solved.bmp"))
-  tell "Final representations of the integrals will look like:\n"
-  mapM_ (tell . printRow (integralMaps s)) rs
+  info "Final representations of the integrals will look like:\n"
+  mapM_ (info . printRow (integralMaps s)) rs
   where printRow intmap r =
           concat [showIntegral intmap (fst . V.head $ r)
                  , " -> {"
@@ -207,7 +205,7 @@ ice = do
   performElimination -- get system to upper echelon form, discarding
                      -- lineraly dependent equations
   endTime <- liftIO getCurrentTime
-  tell' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
+  info' "Wall time needed for reduction: " (diffUTCTime endTime startTime)
   printForwardResults
   when (backsub c) $
     performBackElim >> printBackResults
@@ -215,7 +213,5 @@ ice = do
 main :: IO ()
 main = do
   c <- cmdArgs config
-  (_, _, messages) <- runRWST ice c undefined
-  lFile <- openFile (logFile c) WriteMode
-  hPutStrLn lFile messages
-  hClose lFile
+  initLog c
+  void $ runRWST ice c undefined

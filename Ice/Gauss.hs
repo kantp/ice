@@ -97,12 +97,12 @@ iteratedForwardElim = do
   let (!rs',_,!j,!i) = withMod p0 $ oneForwardElim xs0 eqs
       r0 = V.length i
       bound0 = getBound (fromIntegral r0) p0
-      showBound b = tell $ "The probability that too many equations were discarded is less than " ++ show b ++ "\n"
+      showBound b = info $ "The probability that too many equations were discarded is less than " ++ show b ++ "\n"
   showBound bound0
   if bound0 < goal
     then return (p0, rs', undefined, j, i)
     else let redoTest r bound rs = do
-               tell "Iterating to decrease probability of failure."
+               info "Iterating to decrease probability of failure."
                (p, xs) <- choosePoints
                let (_,_,_,i') = withMod p $ oneForwardElim xs eqs
                    r' = V.length i'
@@ -116,9 +116,9 @@ iteratedForwardElim = do
                                  showBound bound'' >>
                                  if bound'' < goal then return (p, rs', undefined, j, i)
                                  else redoTest r bound'' rs
-                 Restart -> tell "Unlucky evaluation point(s), restarting." >>
+                 Restart -> info "Unlucky evaluation point(s), restarting." >>
                    iteratedForwardElim
-                 Unlucky -> tell "Unlucky evaluation point, discarding." >>
+                 Unlucky -> info "Unlucky evaluation point, discarding." >>
                    redoTest r bound splitRows
              splitRows = partitionEqs (V.toList i) eqs
          in redoTest r0 bound0 splitRows
@@ -167,7 +167,7 @@ evalIbps xs rs = BV.fromList (map treatRow rs)  where
 
 performBackElim :: IceMonad ()
 performBackElim = do
-  tell "Perform Backwards elimination.\n"
+  info "Perform Backwards elimination.\n"
   forward@(FpSolved p rs _ _) <- gets system
   nOuter <- liftM (Map.size . fst) $ gets integralMaps
   let rs' = withMod p $
@@ -223,6 +223,6 @@ choosePoints = do
   nInvs <- asks (length . invariants)
   p <- liftIO $ liftM2 (!!) (return pList) (getRandomR (0,length pList - 1))
   xs <- liftIO $ V.generateM nInvs (\_ -> getRandomR (1,p))
-  tell $ "Probing for p = " ++ show p ++ "\n"
-  tell $ "Random points: " ++ show (V.toList xs) ++ "\n"
+  info $ "Probing for p = " ++ show p ++ "\n"
+  info $ "Random points: " ++ show (V.toList xs) ++ "\n"
   return (p, xs)
