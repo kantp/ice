@@ -1,3 +1,7 @@
+{-|
+Module: Ice.Types
+Description: data type declarations used in Ice.
+-}
 {-# LANGUAGE BangPatterns              #-}
 {-# LANGUAGE DeriveDataTypeable        #-}
 {-# LANGUAGE DeriveFunctor             #-}
@@ -7,18 +11,43 @@
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE TypeSynonymInstances      #-}
 module Ice.Types
-
+       (
+       -- * Configuration of the program
+       Config (..), config
+       -- * Feynman integrals, terms, polynomials, equations
+       , SInt (..), isBeyond
+       , Term (..), MPoly (..)
+       , IbpLine (..), Ibp (..)
+       -- * Systems of linear equations
+       , Equation
+       , LinSystem (..), sparsityPattern, nEq, selectRows
+       , RowKey (..), RowTree
+       , buildRowTree, updateRowTree
+       -- * Result of a Monte Carlo run
+       , TestResult (..)
+       , EliminationResult (..)
+       -- * Monad in which the program runs
+       , IceMonad, StateData (..)
+       -- * logging
+       , initLog, info, info'
+       )
 where
 
 import           Control.Monad.RWS
-import qualified Data.Array.Repa        as R
-import           Data.List              (intercalate)
-import qualified Data.Map.Strict        as Map
+import qualified Data.Array.Repa           as R
+import           Data.Int                  (Int64)
+import           Data.List                 (intercalate)
+import qualified Data.Map.Strict           as Map
 import           Data.Ord
-import qualified Data.Vector            as BV
-import qualified Data.Vector.Unboxed    as V
-import           Data.Word              (Word8)
+import qualified Data.Vector               as BV
+import qualified Data.Vector.Unboxed       as V
+import           Data.Word                 (Word8)
+import           Ice.Fp
 import           System.Console.CmdArgs
+import           System.Log.Formatter
+import           System.Log.Handler        (setFormatter)
+import           System.Log.Handler.Simple
+import           System.Log.Logger
 
 
 -- | Configuration via cmdargs library.
@@ -64,19 +93,56 @@ data StateData = StateData { system       :: LinSystem
                            } deriving Show
 
 -- | State Monad of Ice.
-type IceMonad a = RWST Config String StateData IO a
+type IceMonad a = RWST Config () StateData IO a
+
+-- | A single line in a system of equations
+type Equation a = BV.Vector (Int, a)
 
 -- | A linear system can either be a system with polynomial entries,
 -- an image under evaluation modulo a prime, or a solution of an
 -- image.
 data LinSystem = PolynomialSystem [Equation MPoly]
-               | FpSystem { prime :: Int
-                          , as    :: V.Vector Int
-                          , mijs  :: [Equation Int] }
-               | FpSolved { prime              :: Int
-                          , image              :: [V.Vector (Int, Int)]
+               | FpSystem { prime :: Int64
+                          , as    :: V.Vector Int64
+                          , mijs  :: [Equation Int64] }
+               | FpSolved { prime              :: Int64
+                          , image              :: [V.Vector (Int, Int64)]
                           , rowNumbers         :: [Int]
                           , pivotColumnNumbers :: V.Vector Int} deriving Show
+
+-- | During forward elimination, we keep the equations in a sorted
+-- tree.  This has the advantage that it is easy to find the next
+-- pivot row, find all rows that will be modified in the next step,
+-- and reinsert the modified equations.
+--
+-- Equations are ordered with the following priority:
+--
+-- - column index of first non-zero entry
+-- - number of times this equations has been modified
+-- - number of terms originally in the equation
+-- - original row number
+data RowKey = RowKey { _kCol   :: {-# UNPACK #-} !Int
+                     , _kMod   :: {-# UNPACK #-} !Int
+                     , _KTerms :: {-# UNPACK #-} !Int
+                     , _kRow   :: {-# UNPACK #-} !Int
+                     }
+  deriving (Ord, Eq)
+
+type RowTree s = Map.Map RowKey (Row s)
+buildRowTree :: BV.Vector (Row s) -> RowTree s
+buildRowTree = Map.fromList . BV.toList
+               . BV.filter (not . V.null . snd)
+               . BV.imap (\ i r -> ((RowKey (fst (V.head r)) 0 (V.length r) i), r))
+
+updateRowTree :: (Row s -> Row s) -> RowTree s -> [(RowKey, Row s)]
+{-# INLINE updateRowTree #-}
+updateRowTree f rs =
+  Map.elems . Map.filter (not . V.null . snd)  $
+  Map.mapWithKey (\ (RowKey _ n t i) r ->
+                    let !r' = f r
+                        k = RowKey (fst (V.head r')) (n+1) t i
+                    in (k, r')) rs
+
 
 -- | Count the number of equations in a linear system.
 nEq :: LinSystem -> Int
@@ -113,22 +179,18 @@ instance Ord SInt where
     laportaOrdering :: V.Vector Int -> V.Vector Int -> Ordering
     laportaOrdering =
       comparing (V.length . V.filter (>0)) -- number of propagators.
-      `mappend` comparing (numDots . SInt) -- total number of dots.
-      `mappend` comparing (numSPs . SInt) -- total number of scalar products.
-      `mappend` compareMissingProps -- comapre which propagators are present/absent.
-      `mappend` comparePropPowers -- compare powers of individual propagators.
-      `mappend` compareSpPowers -- compare powers of individual scalar products.
+      <> comparing numDots -- total number of dots.
+      <> comparing numSPs -- total number of scalar products.
+      <> compareMissingProps -- comapre which propagators are present/absent.
+      <> comparePropPowers -- compare powers of individual propagators.
+      <> compareSpPowers -- compare powers of individual scalar products.
     compareMissingProps xs ys = mconcat (zipWith (\ a b -> compare (signum (max a 0)) (signum (max b 0))) (V.toList ys) (V.toList xs))
     comparePropPowers xs ys = mconcat (zipWith (\ a b -> compare (max a 0) (max b 0)) (V.toList xs) (V.toList ys))
     compareSpPowers xs ys = mconcat (zipWith (\ a b -> compare (max (- a) 0) (max (- b) 0)) (V.toList xs) (V.toList ys))
-
--- | The total number of dots of an integral.
-numDots :: SInt -> Int
-numDots (SInt xs) = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
-
--- | The total number of scalar products of an integral.
-numSPs :: SInt -> Int
-numSPs (SInt xs) = - (V.sum . V.filter (<0) $ xs)
+    -- The total number of dots of an integral.
+    numDots = V.sum . V.map (+ (-1)) . V.filter (>0)
+    -- The total number of scalar products of an integral.
+    numSPs xs = - (V.sum . V.filter (<0) $ xs)
 
 -- | Check whether an integral has more dots and/or scalar products
 -- than allowed.
@@ -138,7 +200,7 @@ isBeyond c (SInt xs) = r > rMax c || s > sMax c
     r = V.sum . V.map (+ (-1)) . V.filter (>0) $ xs
     s = - (V.sum . V.filter (<0) $ xs)
 
---  | One term in a polynomial in the kinematic invariants and d
+-- | One term in a polynomial in the kinematic invariants and d
 data Term = Term !Integer !(V.Vector Word8) deriving Show
 -- | One term in an IBP equation.
 data IbpLine a = IbpLine !SInt !a deriving (Show, Functor)
@@ -158,12 +220,38 @@ instance Num MPoly where
   fromInteger = error "fromInteger not implemented for multivariate polynomials."
   abs =         error "abs not implemented for multivariate polynomials."
 
-type Equation a = BV.Vector (Int, a)
-
 -- | Result of successive Monte Carlo runs.
 data TestResult = Unlucky -- ^ We have hit a bad evaluation point and have to discard the result of this run.
                 | Restart -- ^ The previous run had a bad evaluation point, and we have to restart.
                 | Good !Double -- ^ We have not detected a bad point, and the chance that our result is wrong is less than this.
 
+-- | Result of a forward elimination.
+data EliminationResult s = EliminationResult
+  { resP         :: !Int64
+  -- ^ prime number used in the elimination
+  , resRows      :: [Row s]
+  -- ^ non-zero rows after forward elimination
+  , det          :: !(Fp s Int64)
+  -- ^ determinant of the system
+  , pivotColumns :: !(V.Vector Int)
+  -- ^ columns of pivot elements
+  , pivotRows    :: !(V.Vector Int)
+  -- ^ rows of pivot elements
+  }
 
+-- | Initialise the logger
+initLog :: Config -> IO ()
+initLog c = do
+  h <- fileHandler (logFile c) INFO >>= \lh -> return $
+        setFormatter lh (simpleLogFormatter "[$time] $msg")
+  updateGlobalLogger rootLoggerName removeHandler
+  updateGlobalLogger "ice" (addHandler h)
+  updateGlobalLogger "ice" (setLevel INFO)
 
+-- | Print information to the logfile
+info :: String -> IceMonad ()
+info = liftIO . infoM "ice"
+
+-- | Log a message from a string and something with a 'Show' instance.
+info' :: (Show a) => String -> a -> IceMonad ()
+info' x y = info (x ++ show y ++ "\n")
