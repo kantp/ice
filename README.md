@@ -13,8 +13,8 @@ Executing
 stack install
 ```
 in the directory containing the sources of ice will install the ice
-executable to =$HOME/.local/bin/ice=.  You can either add that
-directory to your =PATH=, or use stack to run ice, as in
+executable to `$HOME/.local/bin/ice`.  You can either add that
+directory to your `PATH`, or use stack to run ice, as in
 ```
 stack exec -- ice -id -im example/se1l.in
 ```
