@@ -30,6 +30,7 @@ import           Ice.Gauss
 import           Ice.ParseIbp
 import           Ice.Types
 import           System.Console.CmdArgs
+import           System.Environment (getArgs, withArgs)
 import           System.IO
 import           System.Remote.Monitoring
 
@@ -214,7 +215,8 @@ ice = do
 
 main :: IO ()
 main = do
-  c <- cmdArgs config
+  xs <- getArgs
+  c <- (if null xs then withArgs ["--help"] else id) (cmdArgs config)
   initLog c
   mapM_ (forkServer "localhost") (ekgPort c)
   void $ runRWST ice c undefined
